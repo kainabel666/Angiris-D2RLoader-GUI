@@ -1,0 +1,62 @@
+ANGIRIS LAUNCHER — CHANGELOG
+═══════════════════════════════════════════════════════════════════════
+
+
+V1.1
+─────────────────────────────────────────────────────────────────────
+
+
+NEW: Drag-and-drop mod installer
+
+  • Drop one or more .zip files onto the launcher to install them
+    into <D2R>\mods\.
+  • Multiple drops queue and process sequentially.
+
+
+NEW: Folder collision dialog
+
+  Shown when a mod's target folder already exists.
+    Update     — overwrite same-named files, add new files,
+                 preserve folder-only files.
+    Overwrite  — wipe destination, extract fresh.
+    Cancel     — skip this archive.
+
+
+NEW: D2R path missing dialog
+
+  Shown when a zip is dropped before the D2R install folder is set.
+    Set Path   — opens the folder picker.
+    Cancel     — clears the install queue.
+
+
+NEW: Invalid mod archive dialog
+
+  Shown when a dropped zip contains no modinfo.json. Names the
+  archive, then continues with the next in the queue.
+
+
+NEW: Install progress dialog
+
+  • Current archive filename and queue position ("Installing Mod
+    2 of 5").
+  • Five-stage progress bar: Starting → Extracting → Locating mod
+    info → Installing → Done.
+
+
+CHANGED: Colour palette
+
+  Removed:  Black, Bright Green.
+  Added:    Crimson, Amber, Silver, Frost Teal, Sapphire,
+            Royal Purple.
+
+  Palette is now twelve entries, ordered warm → cool.
+
+
+CHANGED: Mod row title colour
+
+  Dimmed to the antique-gold accent. Tracks the toolbar Colour
+  selection.
+
+FIXED: Minimize and timer
+
+  Now look for D2RLoader.exe or D2R.exe for Minimize and Reload Timers

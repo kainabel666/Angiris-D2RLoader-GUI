@@ -1,0 +1,490 @@
+================================================================================
+                      D2RLOADER  -  FREQUENTLY ASKED QUESTIONS
+================================================================================
+
+
+--------------------------------------------------------------------------------
+  GETTING STARTED
+--------------------------------------------------------------------------------
+
+
+Q: Where do I install the launcher?
+A: Anywhere. It's fully portable. It only writes to its own folder
+   (launcher_config.json, assets\seeds.json), to the per-mod "Launcher Files\"
+   subfolders, and to D2RLoader.ini in your D2R install.
+
+
+Q: The launcher can't find D2R. What do I do?
+A: At startup the launcher tells you if it couldn't detect your install. Use
+   the "..." button next to the Loader Directory field (bottom-left) and pick
+   your "Diablo II Resurrected" folder (the one containing D2R.exe). The path
+   persists in launcher_config.json.
+
+
+Q: What if my D2R install is on a different drive or an unusual path?
+A: Same answer - use the "..." button and point it at the folder. Any folder
+   containing D2R.exe / D2RLoader.exe works.
+
+
+Q: Why can't I type directly into the Loader Directory box?
+A: It's read-only on purpose, to avoid typos that would break mod detection.
+   Change it only through the "..." button, which opens a folder picker.
+
+
+Q: It says "No Mods Found" at startup.
+A: The launcher looked in <D2R>\mods\ and found nothing. Use "Nexus Mod
+   Directory" (center column) to find mods, open your mods folder with the
+   left-rail "Mods" button, drop the mod in there, then click Refresh.
+
+
+--------------------------------------------------------------------------------
+  THE MOD LIST
+--------------------------------------------------------------------------------
+
+
+Q: My mod isn't appearing in the list.
+A: Check three things:
+   1. The mod folder is directly inside <D2R>\mods\, not nested deeper
+   2. There's a modinfo.json file
+   3. The launcher knows where D2R is (Loader Directory, bottom-left)
+   The launcher watches the mods folder, so when something changes the
+   "Refresh" button highlights - click it to rescan.
+
+
+Q: I added a mod but the list didn't update.
+A: The launcher doesn't auto-rescan (that would flicker the UI). When it
+   notices a change, the Refresh button highlights. Click Refresh to pick up
+   the new state. You can also click Refresh any time.
+
+
+Q: A mod shows up but with the wrong name.
+A: The launcher uses modinfo.json fields in this priority order:
+       1. "title" (if present)
+       2. "name"
+       3. The folder name itself
+   Add a "title" field to modinfo.json for a nicer display name.
+
+
+Q: How many mods does the list show at once?
+A: Up to 5 rows are visible at any time. If you have more than 5 mods, use
+   the scrollbar on the right edge of the list (or the mouse wheel) to scroll
+   to the rest. The number of installed mods is unlimited.
+
+
+Q: How do I get a mod's banner to show?
+A: The mod author needs to:
+   1. Add a "Launcher Files\" subfolder inside the mod's folder
+   2. Drop a banner image in there
+   3. Add "banner": "filename.jpg" to modinfo.json
+   The banner fills the mod's row as a background. See README.txt > BANNERS.
+
+
+Q: My banner looks cropped.
+A: Rows use "cover" semantics - the image scales to fill the row and crops the
+   overflow. The row is much wider than it is tall, so tall or square images
+   get cropped top and bottom. Use a wide image, or bake your layout (name /
+   author / version) directly into the banner art.
+
+
+Q: My mod has no banner. What shows instead?
+A: A clean text fallback: the row is transparent (the panel's stone background
+   shows through) with the mod name on top and "by Author    v X.Y.Z" on a
+   second line (the version sits at the row's horizontal midpoint). There's
+   no hard dark box around it, just text on stone.
+
+
+Q: Why are the Discord/Docs/Website buttons missing for my mod?
+A: They only appear if the matching field exists in modinfo.json. Add any of:
+       "docs":    "./docs/manual.pdf"
+       "website": "https://example.com"
+       "discord": "https://discord.gg/abc123"
+   These can be URLs or file paths (relative or absolute).
+
+
+Q: Why don't the Discord/Docs/Website buttons grow on hover like the others?
+A: They're deliberately flat - they have a click-shrink animation (to confirm
+   the press) but no hover-grow, so they match the title-bar minimize/close
+   buttons and the Refresh button. The Nexus and Update Selected Mod buttons
+   still grow on hover because they're meant to read as more prominent calls
+   to action.
+
+
+--------------------------------------------------------------------------------
+  LAUNCH OPTIONS / FLAGS
+--------------------------------------------------------------------------------
+
+
+Q: What do the six flag toggles do?
+A: They become command-line arguments passed to D2RLoader.exe:
+       Use Txts    -> -txt              (loads modded .txt files)
+       No Sound    -> -ns               (disables all audio)
+       Window      -> -w                (windowed instead of fullscreen)
+       Skip Intro  -> -skiplogovideo    (bypasses the intro logos)
+       Respec      -> -enablerespec     (allows free skill unlimted respec)
+       Reset Maps  -> -resetofflinemaps (re-rolls all map seeds at launch)
+   See the Seed row below the flag grid for the seventh arg (-seed).
+
+
+Q: Why can't I turn off "Use Txts"?
+A: The current version of D2RLoader requires -txt to be on, so the launcher
+   locks that flag on (it's dimmed and can't be toggled). If a future D2RLoader
+   removes the requirement, this lock will be lifted.
+
+
+Q: My flags reset every time I switch mods.
+A: They don't reset - they're saved per-mod in each mod's
+   "Launcher Files\launcher_mod_cfg.json". Switching mods loads that mod's
+   saved flags; switching back loads the original ones. This is intentional.
+
+
+Q: Can I see the full launch command before clicking PLAY?
+A: Yes - the launch-command preview in the Launch Options panel shows exactly
+   what's about to be passed to D2RLoader.exe, and updates live as you toggle
+   flags or type into the Seed field. The preview box auto-resizes between
+   1, 2, and 3 text rows depending on how much wraps.
+
+
+--------------------------------------------------------------------------------
+  SEED  (-seed)
+--------------------------------------------------------------------------------
+
+
+Q: What is the Seed row for?
+A: It controls D2R's -seed command-line argument, which forces a specific
+   map / drop seed for the game session. The row has three parts:
+       [checkbox]   "Seed"
+       [text input]  - type a numeric seed value (digits only)
+       [v] arrow     - opens a dropdown of saved seeds (presets + recents)
+   The seed is per-mod (it goes into the mod's launcher_mod_cfg.json), and
+   when the checkbox is on it's appended as "-seed VALUE" at the END of the
+   launch command, after -skiplogovideo.
+
+
+Q: Where do the dropdown entries come from?
+A: From assets\seeds.json next to the launcher. The file has two arrays:
+   * "seeds"  - author-defined presets you can name (e.g. "Speedrun 1.13c")
+   * "recent" - the launcher's rolling 3-slot history of values YOU typed
+   Recents show at the TOP of the dropdown (newest first, labeled
+   "Recent3", "Recent2", "Recent1"); presets follow below.
+
+
+Q: How do recents work?
+A: When you type a value into the Seed input and commit it (press Enter,
+   click outside the box, or open the arrow dropdown), the launcher saves
+   that value to assets\seeds.json under "recent". Up to 3 are kept. When a
+   4th gets added the oldest one falls off:
+       before:  Recent1=A  Recent2=B  Recent3=C   (C is newest)
+       type D:  Recent1=B  Recent2=C  Recent3=D   (A fell off)
+   Values that already match a preset or an existing recent are NOT added
+   again (no duplicates, no reshuffling).
+
+
+Q: What keys work in the Seed text input?
+A: Digits 0-9 type normally; everything else is filtered out (no letters,
+   no separators, no decimal points). Standard text-input controls all work:
+       Left / Right            - move caret one position
+       Home / End              - jump to start / end
+       Backspace / Delete      - remove a character
+       Shift + Left / Right    - extend selection
+       Shift + Home / End      - select to start / end
+       Click in the input      - position caret at click point
+       Click + drag            - drag-select a range
+       Ctrl+A                  - select all digits in the input
+       Ctrl+C                  - copy selection (or whole value if none)
+       Ctrl+X                  - cut selection
+       Ctrl+V                  - paste from clipboard (digits only - any
+                                 non-digit characters in the pasted text
+                                 are filtered out)
+       Enter                   - commit + leave the input
+       Esc                     - leave the input without committing to
+                                 recents (the value stays, just isn't saved
+                                 to seeds.json)
+
+
+Q: I selected a seed but my checkbox is still off. Will -seed be passed?
+A: No. The checkbox is the master switch. When it's off, the typed/selected
+   value is preserved (so you can prepare it), but -seed is NOT appended.
+   Toggle the checkbox on to actually use the value.
+
+
+Q: Why is the Seed text greyed out?
+A: That means the checkbox is off (the value won't be used). The text is
+   still readable but rendered dim to make the inactive state obvious.
+   Click the checkbox to enable.
+
+
+Q: Why doesn't a value I picked show up in Recents?
+A: Only values you TYPE get added to Recents. Picking an existing entry from
+   the dropdown (whether a preset or a recent) doesn't create a new Recent
+   entry - it's already in the list.
+
+
+Q: Can I delete a Recent entry?
+A: Not from the UI. Open assets\seeds.json and remove the entry from the
+   "recent" array. Or just type new values - the oldest one drops off
+   automatically once you've added 3 more.
+
+
+Q: How do I add my own presets to the seeds dropdown?
+A: Edit assets\seeds.json. Each entry has a name (what the dropdown shows)
+   and a value (what gets passed to -seed):
+
+       {
+         "seeds": [
+           {"name": "Speedrun 1.13c", "value": "1234567"},
+           {"name": "Holy Grail Run", "value": "999"}
+         ],
+         "recent": []
+       }
+
+   Restart the launcher to pick up changes. Presets pass through the
+   launcher untouched; only the "recent" array gets rewritten.
+
+
+Q: My seeds.json is missing or corrupted - now what?
+A: If the file is missing or has no "seeds" array, the launcher falls back
+   to a small built-in starter list (Random/Standard/Speedrun A/Speedrun B)
+   so the dropdown still works. The fallback is overwritten as soon as you
+   drop a real seeds.json in.
+
+
+
+--------------------------------------------------------------------------------
+  TOOLBAR  (SCALE / FONT / COLOUR)
+--------------------------------------------------------------------------------
+
+
+Q: What's the row of four controls under the mod list?
+A: That's the appearance toolbar:
+       On Launch - 3-state slider that changes what happens to the launcher when you launch a mod (Minimize it, close it or have it stay on screen)
+       Scale  - 3-state slider that cycles through three UI size presets
+       Font   - dropdown of the bundled .ttf fonts in assets\fonts\
+       Colour - dropdown of 8 gold/red/green accent colors
+   Each saves immediately to launcher_config.json and applies live.
+
+
+Q: How does the Scale slider work? Why does mine show different percentages?
+A: The slider has three positions: 0 (small), 1 (medium), 2 (large). The
+   ACTUAL percentages depend on your Windows display scaling:
+       Windows at 100%   -> 100%, 115%, 127%
+       Windows at 150%+  -> 75%,  85%,  100%
+   The launcher detects your system DPI and picks whichever 3-preset set
+   keeps the window from overflowing your screen. Click the slider to
+   cycle through the three; the text box above shows the active value.
+
+
+Q: Why did my UI scale reset when I changed Windows display settings?
+A: Between sessions, the launcher checks whether your system DPI changed
+   since last close. If it did, the saved ui_scale resets to 1.0 because a
+   scale that looked right at 100% can leave the window way too small at
+   150% (or off-screen at 175%). Pick the size you want from the slider
+   and it'll stick for that DPI.
+
+
+Q: The fonts in the dropdown look the same / I don't see Cinzel.
+A: The dropdown reads every .ttf in assets\fonts\. If you don't see one,
+   the file isn't there. Names are abbreviated for display (e.g.
+   "Cinzel-Bold" -> "Cin-Bol") but it's the same family. See README.txt >
+   TYPOGRAPHY for the bundled set.
+
+
+Q: I picked a different font and now everything is huge / clipped.
+A: Different fonts have different "cell heights" at the same em size -
+   Cinzel Black is much taller than Exocet Blizzard at the same nominal
+   size. The launcher caps every user font's rendered cell height at
+   Exocet's (its reference family), so this should be rare. If you still
+   see clipping, try a smaller Scale preset or pick a less display-heavy
+   font.
+
+
+Q: The Colour dropdown changed text but my mod row borders are still gold.
+A: The accent color drives every gold-token paint site (text, chevrons,
+   highlights). Some chrome (the engraved frame, the gem ornament, the
+   stone backgrounds) is part of the artwork itself and doesn't follow the
+   token. That's intentional - the art is meant to read as bronze
+   regardless of the accent color.
+
+
+Q: Black accent is hard to read.
+A: Yeah, it is. The "Black" preset is included for completeness but it
+   trades readability for a dark-mode look. Pick "Pale Gold" or "Bright
+   Gold" for the most legible text.
+
+
+--------------------------------------------------------------------------------
+  LOADER OPTIONS (D2RLoader.ini)
+--------------------------------------------------------------------------------
+
+
+Q: What do "Stash Tabs" and "Dmg Display" do?
+A: They write directly to D2RLoader.ini in your D2R folder:
+       Stash Tabs   -> [Stash] extra_shared_tabs   (0-16 extra shared tabs)
+       Dmg Display  -> [Advanced.Logging] damage_indicator (0-2)
+   They're global - they apply to every mod, not just the selected one.
+
+
+Q: Will changing these wipe my other D2RLoader.ini settings?
+A: No. The launcher edits only those two specific lines and leaves everything
+   else - including your comments and any keys it doesn't recognize - exactly
+   as it found them.
+
+
+Q: The dropdowns show 0 even though my INI has other values.
+A: If D2RLoader.ini doesn't exist when the launcher starts, the values default
+   to 0. Set the Loader Directory correctly (so the launcher can find the INI),
+   then restart, or just pick a value from the dropdown to write it.
+
+
+--------------------------------------------------------------------------------
+  UPDATES
+--------------------------------------------------------------------------------
+
+
+Q: What's the gold arrow badge on a mod row?
+A: It means an update is available for that mod (the mod opted in to update
+   checking via modinfo.json). The Mod Description panel shows the version
+   change and a "[Details]" link.
+
+
+Q: I clicked "[Details]" / "Update Selected Mod" and it just opened a webpage.
+A: That's by design. The launcher points you at the mod's source page so you
+   can download and install the update yourself. It deliberately does NOT
+   auto-download or auto-install updates, because it can't verify the integrity
+   of files it didn't build. Review the update at the source, then install it
+   the way the author intends.
+
+
+Q: How does a mod opt in to update checking?
+A: The author adds one of these to modinfo.json:
+       "update_github":   "owner/repo"
+       "update_manifest": "https://.../version.json"
+   See README.txt > UPDATES.
+
+
+--------------------------------------------------------------------------------
+  THE BOTTOM PANEL
+--------------------------------------------------------------------------------
+
+
+Q: What's the little arrow under the mod list?
+A: It expands/collapses the bottom panel. Down arrow = collapsed (click to
+   open); up arrow = expanded (click to close). The window grows taller when
+   open and shrinks back when closed. These options are intended for modding use
+   and not for players.
+
+
+Q: How do the "Edit TXT / Sprite / JSON / Models / Textures / Particles"
+   buttons know where my tools are?
+A: The first time you click one, the launcher searches your tools folder for
+   the relevant .exe (resolving .lnk shortcuts) and caches the path in
+   launcher_config.json. Later clicks are open the application immediately
+
+
+Q: A tool button said it couldn't find the tool.
+A: Either the tool isn't in your tools folder, or it has a different filename
+   than expected. When prompted, click to locate the .exe manually; the
+   launcher caches your choice for next time.
+
+
+Q: Where do I download these tools?
+A: Use the DOWNLOADS column in the bottom panel:
+       AFJ Pro Text Editor
+       Eez's Sprite Editor
+       Visual Basic Code
+   The links open in your browser.
+
+
+Q: What do the REFERENCES buttons do?
+A: They open community modding resources in your browser (Eez's File Guides,
+   The Phrozen Keep, Amazon Basin).
+
+
+--------------------------------------------------------------------------------
+  THE WINDOW
+--------------------------------------------------------------------------------
+
+
+Q: Can I resize the window?
+A: Not by dragging - the size is fixed for the current UI scale. To change
+   the size, use the Scale slider in the appearance toolbar (under the mod
+   list). The window also grows taller by a fixed amount when you open the
+   bottom panel.
+
+
+--------------------------------------------------------------------------------
+  CONFIG / DATA
+--------------------------------------------------------------------------------
+
+
+Q: Where are my settings stored?
+A: Four places:
+   * launcher_config.json (next to the launcher exe) - global settings
+   * assets\seeds.json (next to the launcher exe) - seed presets + recents
+   * <mod>\Launcher Files\launcher_mod_cfg.json - per-mod flags + seed
+   * D2RLoader.ini (in your D2R folder) - stash tabs + damage display
+   All are plain text and safe to inspect.
+
+
+Q: How do I reset all launcher settings?
+A: Quit the launcher and delete launcher_config.json. To also reset per-mod
+   flags + seeds, delete the launcher_mod_cfg.json files inside each mod's
+   Launcher Files folder. To clear the seed recents history, edit
+   assets\seeds.json and empty the "recent" array. (Deleting these won't
+   touch D2RLoader.ini.)
+
+
+Q: The launcher won't start.
+A: Make sure the launcher exe and the assets\ folder are together, and that
+   you're running from a folder you have write access to (it writes
+   launcher_config.json next to itself). Re-extract from the archive if files
+   are missing.
+
+
+--------------------------------------------------------------------------------
+  MOD AUTHORS
+--------------------------------------------------------------------------------
+
+
+Q: How do I make my mod look nice in the launcher?
+A: Edit your modinfo.json to include the optional fields:
+
+       {
+         "name":        "MyMod",                  (required - D2R reads this)
+         "savepath":    "MyMod\",                 (required - D2R reads this)
+         "title":       "My Awesome Mod",         (optional - display name)
+         "version":     "1.2.3",
+         "author":      "Your Name",
+         "description": "Shown in the Mod Description panel",
+         "banner":      "Banner.jpg",             (optional - row background)
+         "docs":        "./docs/manual.pdf",      (optional - Docs button)
+         "website":     "https://yourmod.com",    (optional - Website button)
+         "discord":     "https://discord.gg/x",   (optional - Discord button)
+         "update_github":   "owner/repo"          (optional - update checking)
+       }
+
+   Then create a "Launcher Files\" subfolder inside your mod folder and drop
+   your banner image there. See README.txt > MOD METADATA.
+
+
+Q: What size should my banner be?
+A: Wide. The row is much wider than it is tall (96 x 600), and the image
+   is cropped to "cover" the row. A wide banner crops cleanly; a tall or square
+   one loses its top and bottom. You can bake the name/author/version into the
+   art if you want full control. See README.txt > BANNERS.
+
+Q: How do I set my mod up so that the launcher checks for updates?
+A: See README.txt > HOW TO SET UP MY MOD FOR UPDATE CHECKS. It is the last section
+   of the README, right before the CREDITS.
+
+--------------------------------------------------------------------------------
+  STILL NOT WORKING?
+--------------------------------------------------------------------------------
+
+Describe the problem in your D2R modding community of choice. Include:
+
+* What you were trying to do
+* What actually happened
+* Whether launcher_config.json shows reasonable values
+* Whether the mod's modinfo.json is valid JSON
+
+================================================================================

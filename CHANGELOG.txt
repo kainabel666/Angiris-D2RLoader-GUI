@@ -2,8 +2,106 @@ ANGIRIS LAUNCHER — CHANGELOG
 ═══════════════════════════════════════════════════════════════════════
 
 
-V1.1
+V1.2
 ─────────────────────────────────────────────────────────────────────
+
+
+NEW: Per-mod playtime tracking
+
+  • The launcher records cumulative play time for each mod and the
+    date it was last played.
+  • Hover over any mod row for two seconds to see a tooltip with the
+    mod's total playtime and last-played date.
+  • Tracking starts when D2R is detected as running after launching a
+    mod, and stops when D2R exits. Time spent in the launcher itself
+    isn't counted.
+  • Data stored in assets\playtime.json, keyed by mod folder so it
+    survives reinstalls.
+
+
+NEW: Right-click context menu on mod rows
+
+  Right-click any mod for a themed menu with:
+    Backup Saves   - manually snapshot the mod's save folder.
+    Re-zip         - package the mod folder back into a .zip in
+                     <D2R>\mods\ (useful for sharing or backing up).
+    Uninstall      - delete the mod from <D2R>\mods\ entirely (asks
+                     for confirmation; a save backup runs first).
+
+
+NEW: Save backup system
+
+  • The mod's full save folder (under
+    %USERPROFILE%\Saved Games\Diablo II Resurrected\Mods\<savepath>\)
+    gets snapshotted into a "backups\<YYYY-MM-DD_HHMMSS>\" subfolder
+    next to the save data it protects.
+  • Manual snapshot via the right-click "Backup Saves" menu item.
+  • Automatic snapshot before any Overwrite install (where the
+    destination mod folder is about to be wiped) and before any
+    Uninstall.
+  • Rotation keeps the five most recent snapshots; older ones are
+    pruned automatically.
+
+
+NEW: Launcher self-update
+
+  • The launcher checks GitHub for newer releases on startup.
+  • When a newer version is available, the version label in the left
+    rail (under the logo) glows gold and becomes clickable.
+  • Clicking it opens the update prompt with three options:
+        Update            - download and install in place
+        Skip This Version - dismiss for this specific version
+                            (remembered until a newer version ships)
+        Ignore            - dismiss just this once (prompt reappears
+                            on next launch)
+  • Clicking Update hides the main window, releases its locked
+    assets, and shows a minimal install popup with three statuses:
+        Downloading -> Updating -> Complete
+  • A Restart button appears at Complete (enables half a second
+    later to prevent accidental clicks). Clicking it spawns the new
+    launcher and closes the running one.
+
+
+NEW: Self-update old-version cleanup
+
+  • The previous launcher exe is renamed to Angiris.exe.old during
+    the update.
+  • Every startup checks the install folder for an .old file and
+    deletes it if present.
+  • Fast attempt up front handles orphaned .old files immediately.
+  • If the prior launcher process is still releasing its image file,
+    a 2-second background timer keeps retrying for up to 30 seconds.
+  • Final fallback schedules the delete for the next Windows reboot
+    via MoveFileEx, so the user never has to clean up manually.
+
+
+CHANGED: Version label position
+
+  Moved 30 px below the logo to make room for the click-target and
+  glow effect when a launcher update is available.
+
+
+CHANGED: Font files skipped during launcher self-update
+
+  Windows holds an internal mapping for any font that's been used
+  to rasterize glyphs in the current process, which makes the
+  active font's .ttf impossible to overwrite during a live update.
+  Fonts essentially never change between launcher releases, so they
+  are now skipped at the extraction stage of the self-update flow
+  and don't even land in the temp directory. Users who want a font
+  swap can drop new .ttf files into assets\fonts\ manually.
+
+
+FIXED: Self-update install logging readability
+
+  Diagnostic logs (last_update_check.log, last_update_install.log)
+  no longer truncate paths and status text to a single character.
+  Caused by a printf wide-string format mismatch in the MinGW build
+  — every wide-string log line now prints full content correctly.
+
+
+V1.1
+─────────────────────────────────────────────────────────────────
 
 
 NEW: Drag-and-drop mod installer

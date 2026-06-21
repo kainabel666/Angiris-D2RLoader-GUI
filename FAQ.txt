@@ -10,8 +10,9 @@
 
 Q: Where do I install the launcher?
 A: Anywhere. It's fully portable. It only writes to its own folder
-   (launcher_config.json, assets\seeds.json), to the per-mod "Launcher Files\"
-   subfolders, and to D2RLoader.ini in your D2R install.
+   (launcher_config.json, assets\seeds.json, assets\playtime.json), to the
+   per-mod "Launcher Files\" subfolders, and to D2RLoader.ini in your D2R
+   install.
 
 
 Q: The launcher can't find D2R. What do I do?
@@ -107,6 +108,200 @@ A: They're deliberately flat - they have a click-shrink animation (to confirm
    buttons and the Refresh button. The Nexus and Update Selected Mod buttons
    still grow on hover because they're meant to read as more prominent calls
    to action.
+
+
+Q: What does the small tooltip that appears when I hover a mod row show?
+A: Per-mod playtime tracking. After hovering for about two seconds you'll
+   see the mod's total playtime ("12h 34m", "47m", "2d 5h 12m") and when
+   it was last played ("today", "yesterday", "3 days ago", or an actual
+   date for older sessions). See PLAYTIME TRACKING below for details.
+
+
+Q: What happens if I right-click a mod row?
+A: A context menu appears with three options:
+       Backup Saves - immediate snapshot of this mod's save folder
+       Re-zip       - package the mod folder back into a .zip in <D2R>\mods\
+       Uninstall    - delete the mod from <D2R>\mods\ (with confirmation;
+                      runs a save backup first so your characters aren't lost)
+   See README.txt > RIGHT-CLICK MOD MENU for details on each.
+
+
+--------------------------------------------------------------------------------
+  PLAYTIME TRACKING
+--------------------------------------------------------------------------------
+
+
+Q: How does the launcher know how long I've played?
+A: When you click PLAY, the launcher watches for D2RLoader.exe or D2R.exe to
+   start. When it sees the process, the clock starts. When the process exits,
+   the elapsed time is added to that mod's cumulative total. Time spent in
+   the launcher itself - browsing mods, tweaking flags - is NOT counted.
+
+
+Q: I just launched a mod but the playtime didn't update.
+A: The tooltip caches the value until you re-hover or restart the launcher.
+   Move off the row and back onto it after a session to see the updated
+   number. The data file (assets\playtime.json) is always current though -
+   the UI tooltip just has a small cache.
+
+
+Q: I uninstalled and reinstalled a mod - did I lose my playtime?
+A: No, as long as you reinstall it into the same folder name. Playtime is
+   keyed by folder name (not by anything inside the mod), so the history
+   reattaches automatically.
+
+
+Q: Can I reset playtime for one mod?
+A: Yes - close the launcher, open assets\playtime.json, delete that mod's
+   entry, save the file, and relaunch. The mod's playtime resets to 0 and
+   its "last played" is cleared.
+
+
+Q: Can I reset all playtime data?
+A: Delete (or empty) assets\playtime.json. The launcher recreates it on the
+   next mod launch.
+
+
+Q: Why doesn't the timer count time I spent in the launcher figuring out
+   what to play?
+A: That'd inflate every mod's number with browsing time. The launcher
+   intentionally only counts time while D2R is actually running - the
+   metric is "time spent IN the mod", not "time looking AT the mod".
+
+
+--------------------------------------------------------------------------------
+  SAVE BACKUPS
+--------------------------------------------------------------------------------
+
+
+Q: What's a save backup?
+A: A full copy of a mod's save folder, taken at a specific moment. The
+   snapshot goes into a "backups\" subfolder next to the original save data,
+   named with the timestamp (YYYY-MM-DD_HHMMSS). See README.txt > SAVE
+   BACKUPS for the exact paths.
+
+
+Q: When does the launcher take a backup?
+A: Three triggers:
+   1. You right-click a mod and pick "Backup Saves"   (manual)
+   2. You drop a mod zip onto the launcher and pick "Overwrite" in the
+      conflict dialog (auto - the existing mod is about to be wiped)
+   3. You right-click a mod and pick "Uninstall"      (auto)
+
+
+Q: How many backups does the launcher keep?
+A: The five most recent per mod. When you take a sixth, the oldest one is
+   deleted automatically. This keeps your backups folder from growing
+   forever while still giving you meaningful history.
+
+
+Q: How do I restore from a backup?
+A: Manually. Open the backups\ folder (it's next to the live save folder
+   for that mod, under %USERPROFILE%\Saved Games\Diablo II Resurrected\Mods\),
+   pick the timestamped folder you want, and copy its contents up one level
+   to replace the current saves. The layout inside the snapshot mirrors the
+   live folder, so it's a straight copy.
+
+
+Q: Can I disable automatic backups?
+A: Not via the UI. If you really don't want them, the safest workaround is
+   to use Update mode (not Overwrite) on installs - Update preserves your
+   files. For Uninstall, there's no opt-out; the backup is a safety net for
+   your characters.
+
+
+Q: The backup folder is taking up too much space.
+A: Rotation should keep it bounded (5 snapshots max per mod), but if your
+   save folder itself is huge each snapshot will be huge too. You can
+   manually delete older snapshots; the launcher only manages the rotation
+   when a new one is created.
+
+
+--------------------------------------------------------------------------------
+  LAUNCHER SELF-UPDATES
+--------------------------------------------------------------------------------
+
+
+Q: What's the gold-glowing version label in the left rail?
+A: That's the launcher telling you a newer launcher release is available
+   on GitHub. Click it to open the update prompt.
+
+
+Q: I clicked the version label - what are the three buttons?
+A: Update            - download and install the new version in place
+   Skip This Version - dismiss for this specific version (remembered; the
+                       prompt won't reappear until a NEWER version ships)
+   Ignore            - dismiss just this once (the prompt comes back next
+                       launch)
+
+
+Q: I clicked Update and a popup appeared. What's happening?
+A: The launcher is installing the new version in place. The popup shows
+   three statuses:
+       Downloading       - fetching the release zip from GitHub
+       Updating          - extracting and copying new files
+       Complete          - install done, ready to restart
+   When you see Complete, the Restart button enables (after a half-second
+   delay so accidental clicks don't fire). Click it to spawn the new
+   launcher and close the running one.
+
+
+Q: The main launcher window vanished during the update!
+A: That's intentional. The main window has to hide so the asset files it
+   has loaded (PNG images, fonts) get released and can be overwritten. The
+   small update popup is your status indicator during the install.
+
+
+Q: The Restart button never appeared. The popup is stuck on "Updating".
+A: Something failed in the install. Open assets\last_update_install.log
+   and look for the most recent block - it'll show every file that was
+   copied (with paths) and any that failed. Common causes:
+       err=1224 (USER_MAPPED_FILE)   - a file is memory-mapped by the
+                                       running launcher and can't be
+                                       overwritten. Fonts hit this.
+       err=5    (ACCESS_DENIED)      - permissions issue, or antivirus
+                                       blocked the copy
+       err=32   (SHARING_VIOLATION)  - another process has the file open
+
+
+Q: Why is there an Angiris.exe.old file in my launcher folder?
+A: Self-update artifact. The old launcher exe gets renamed to .old during
+   the install (because Windows won't let you overwrite a running .exe).
+   The NEXT time you launch the new version it deletes the .old file
+   automatically. If you see it, just launch the launcher once and it
+   should clear up.
+
+
+Q: I see .old left over even after launching - should I delete it?
+A: You can delete it manually any time it's not the active launcher. The
+   automatic cleanup retries five times with brief delays and falls back to
+   scheduling it for deletion on the next Windows reboot. If something
+   really has it locked (antivirus is the usual culprit), reboot Windows
+   and it'll be cleared.
+
+
+Q: Will updating the launcher replace my fonts / config / playtime data?
+A: Update replaces: the .exe, all PNG assets, JSON data files SHIPPED in
+   the release (e.g. CHANGELOG, README, FAQ), and any docs.
+   Update does NOT replace: .ttf font files (Windows holds an internal
+   mapping for the active font that can't be released mid-process), or
+   user-generated state like launcher_config.json, assets\playtime.json,
+   assets\seeds.json's "recent" array, or your per-mod launcher_mod_cfg.json
+   files (those live in your mods folders, untouched by the install).
+
+
+Q: My font got out of date with launcher updates - now what?
+A: Drop the new .ttf into assets\fonts\ manually. The launcher picks it up
+   on next start. (In practice, fonts almost never change between launcher
+   releases.)
+
+
+Q: Can I roll back to the previous launcher?
+A: If the Angiris.exe.old file is still in your folder, rename Angiris.exe
+   to something else (Angiris.exe.bad), then rename Angiris.exe.old to
+   Angiris.exe. You're back on the previous version. If .old has been
+   deleted, you'll need to download the older release from the GitHub
+   releases page manually.
 
 
 --------------------------------------------------------------------------------
@@ -336,7 +531,7 @@ A: If D2RLoader.ini doesn't exist when the launcher starts, the values default
 
 
 --------------------------------------------------------------------------------
-  UPDATES
+  UPDATES (FOR MODS)
 --------------------------------------------------------------------------------
 
 
@@ -349,9 +544,12 @@ A: It means an update is available for that mod (the mod opted in to update
 Q: I clicked "[Details]" / "Update Selected Mod" and it just opened a webpage.
 A: That's by design. The launcher points you at the mod's source page so you
    can download and install the update yourself. It deliberately does NOT
-   auto-download or auto-install updates, because it can't verify the integrity
-   of files it didn't build. Review the update at the source, then install it
-   the way the author intends.
+   auto-download or auto-install mod updates, because it can't verify the
+   integrity of files it didn't build. Review the update at the source, then
+   install it the way the author intends.
+   (Note: the LAUNCHER itself CAN auto-install its own updates - see LAUNCHER
+   SELF-UPDATES above. Different policy because the launcher's source is one
+   trusted repo.)
 
 
 Q: How does a mod opt in to update checking?
@@ -417,11 +615,13 @@ A: Not by dragging - the size is fixed for the current UI scale. To change
 
 
 Q: Where are my settings stored?
-A: Four places:
+A: Five places:
    * launcher_config.json (next to the launcher exe) - global settings
-   * assets\seeds.json (next to the launcher exe) - seed presets + recents
-   * <mod>\Launcher Files\launcher_mod_cfg.json - per-mod flags + seed
-   * D2RLoader.ini (in your D2R folder) - stash tabs + damage display
+   * assets\seeds.json    (next to the launcher exe) - seed presets + recents
+   * assets\playtime.json (next to the launcher exe) - per-mod playtime
+   * <mod>\Launcher Files\launcher_mod_cfg.json      - per-mod flags + seed
+   * D2RLoader.ini        (in your D2R folder)       - stash tabs +
+                                                       damage display
    All are plain text and safe to inspect.
 
 
@@ -429,8 +629,9 @@ Q: How do I reset all launcher settings?
 A: Quit the launcher and delete launcher_config.json. To also reset per-mod
    flags + seeds, delete the launcher_mod_cfg.json files inside each mod's
    Launcher Files folder. To clear the seed recents history, edit
-   assets\seeds.json and empty the "recent" array. (Deleting these won't
-   touch D2RLoader.ini.)
+   assets\seeds.json and empty the "recent" array. To clear all playtime
+   data, delete assets\playtime.json. (Deleting these won't touch
+   D2RLoader.ini.)
 
 
 Q: The launcher won't start.
@@ -438,6 +639,18 @@ A: Make sure the launcher exe and the assets\ folder are together, and that
    you're running from a folder you have write access to (it writes
    launcher_config.json next to itself). Re-extract from the archive if files
    are missing.
+
+
+Q: What are the .log files in my assets\ folder?
+A: Diagnostic logs from launcher self-updates:
+       last_update_check.log    - what GitHub returned the last time the
+                                  launcher checked its own version (URL,
+                                  version tag, response body)
+       last_update_install.log  - per-file copy results from the most recent
+                                  self-update install attempt (appended, so
+                                  you can see history)
+   Safe to delete - they regenerate next time. Useful if you're troubleshooting
+   a failed self-update.
 
 
 --------------------------------------------------------------------------------
@@ -472,9 +685,11 @@ A: Wide. The row is much wider than it is tall (96 x 600), and the image
    one loses its top and bottom. You can bake the name/author/version into the
    art if you want full control. See README.txt > BANNERS.
 
+
 Q: How do I set my mod up so that the launcher checks for updates?
 A: See README.txt > HOW TO SET UP MY MOD FOR UPDATE CHECKS. It is the last section
    of the README, right before the CREDITS.
+
 
 --------------------------------------------------------------------------------
   STILL NOT WORKING?
@@ -486,5 +701,6 @@ Describe the problem in your D2R modding community of choice. Include:
 * What actually happened
 * Whether launcher_config.json shows reasonable values
 * Whether the mod's modinfo.json is valid JSON
+* For self-update issues, the contents of assets\last_update_install.log
 
 ================================================================================

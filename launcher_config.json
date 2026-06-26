@@ -13,7 +13,8 @@
   "backup_saves":         true,
   "backup_saves_prompted": false,
   "ui_scale":             0.850,
-  "font_name":            "Exocet-Blizzard-Medium",
+  "font_name":            "Cinzel-Bold",
   "font_color":           -1,
+  "skipped_launcher_version": "",
   "last_dpi_scale":       1.500
 }

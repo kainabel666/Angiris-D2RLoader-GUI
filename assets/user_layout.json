@@ -1,0 +1,69 @@
+{
+  "_README": [
+    "Angiris Launcher — user_layout.json",
+    "",
+    "Customizes the launcher UI. Place this file at assets\\user_layout.json",
+    "(next to user_settings.json). Read once at startup — restart the",
+    "launcher to apply changes.",
+    "",
+    "Every field is OPTIONAL. Delete any field or the whole block and the",
+    "launcher reverts to its built-in default for that item. The values",
+    "shown below match the built-ins, so this file as-shipped is a no-op",
+    "— edit values to customize.",
+    "",
+    "JSON has no native comment syntax. Keys prefixed with _ (like _README",
+    "and _doc_*) are documentation; the launcher ignores them.",
+    "",
+    "Two visibility models for buttons:",
+    "  visible: false  →  button is HIDDEN. Layout REFLOWS — buttons below",
+    "                     shift up to fill the gap.",
+    "  enabled: false  →  button is DRAWN (greyed out) and not clickable.",
+    "                     Layout is UNCHANGED."
+  ],
+
+  "_doc_mod_row_height": [
+    "Height in logical pixels of each row in the mod list. Default 96.",
+    "Smaller values fit more mods on screen without scrolling.",
+    "Practical range: 64 (tight) to 120 (spacious)."
+  ],
+  "mod_row_height": 96,
+
+  "_doc_show_modding_expand": [
+    "If false, the chevron toggle that opens the bottom modding panel is",
+    "hidden and the panel cannot be opened. Use this to lock the launcher",
+    "into player-only mode for distributions where you don't want users",
+    "poking at the tool buttons."
+  ],
+  "show_modding_expand": true,
+
+  "_doc_version_label": [
+    "Position of the 'v1.2' label drawn under the logo on the left rail.",
+    "Defaults are computed from the logo's position — if you omit the",
+    "version_label block entirely, the label tracks the logo automatically.",
+    "Set x/y to override with absolute logical coordinates.",
+    "",
+    "Example to nudge the label to absolute pixel position 24,480:",
+    "  \"version_label\": { \"x\": 24, \"y\": 480 }",
+    "",
+    "Block omitted below so the launcher uses its computed defaults."
+  ],
+
+  "_doc_nav_buttons": [
+    "Per-button overrides for the six left-rail navigation buttons.",
+    "Valid IDs: mods, options, logs, help, about, exit.",
+    "Each button has two independent flags:",
+    "  visible — false hides the button and reflows the column",
+    "  enabled — false greys the button out (still drawn, not clickable)",
+    "",
+    "Order in this file does NOT control display order. The launcher",
+    "draws them in a fixed stacking order. (Reordering will be added in",
+    "a future layout version.)"
+  ],
+  "nav_buttons": {
+    "mods":    { "visible": true, "enabled": true },
+    "logs":    { "visible": true, "enabled": true },
+    "help":    { "visible": true, "enabled": true },
+    "about":   { "visible": true, "enabled": true },
+    "exit":    { "visible": true, "enabled": true }
+  }
+}

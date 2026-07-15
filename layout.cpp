@@ -4,8 +4,7 @@
 
 #include "layout.h"
 #include "core.h"   // AppDir, ReadTextFile, JsonStr, JsonInt, JsonBool
-// Phase 7d additions — the Layout / Refresh* / Compute* functions
-// extracted from Angiris.cpp reach into many other modules:
+// Layout / Refresh* / Compute* reach into many modules for state.
 #include "scaling.h"             // S, SF, U, g_dpiScale, SPosL
 #include "colors.h"              // Tok::* (not directly used by layout — included for parity)
 #include "assets.h"              // MeasureFrameInset (frame_main.png inset measurement)
@@ -143,7 +142,7 @@ void LoadLayoutOverrides() {
     wstring navObj = ExtractNestedObject(json, L"nav_buttons");
     if (!navObj.empty()) {
         const wchar_t* kIds[] = {
-            L"mods", L"options", L"logs", L"help", L"about", L"exit",
+            L"mods", L"logs", L"help", L"about", L"exit",
         };
         for (const wchar_t* id : kIds) {
             wstring btnObj = ExtractNestedObject(navObj, id);
@@ -507,7 +506,7 @@ void Layout(int W, int H) {
         int navY = insetT + 16 + 203 + 30;
 
         // Table-driven nav button layout. Each entry binds the button's
-        // user_layout.json id ("mods", "options", etc.) to its HWND.
+        // user_layout.json id ("mods", "logs", etc.) to its HWND.
         // Iteration applies visibility (ShowWindow + skip-position +
         // skip-navY-advance for reflow) and enabled state from the
         // layout-overrides accessors. The list order here defines
@@ -515,12 +514,11 @@ void Layout(int W, int H) {
         // makes the ones below it shift up to fill the gap.
         struct NavBtn { const wchar_t* id; HWND hw; };
         const NavBtn nav[] = {
-            { L"mods",    g_hwNavMods    },
-            { L"options", g_hwNavOptions },
-            { L"logs",    g_hwNavLogs    },
-            { L"help",    g_hwNavHelp    },
-            { L"about",   g_hwNavAbout   },
-            { L"exit",    g_hwNavExit    },
+            { L"mods",  g_hwNavMods  },
+            { L"logs",  g_hwNavLogs  },
+            { L"help",  g_hwNavHelp  },
+            { L"about", g_hwNavAbout },
+            { L"exit",  g_hwNavExit  },
         };
         for (const auto& b : nav) {
             if (!b.hw) continue;
@@ -541,65 +539,93 @@ void Layout(int W, int H) {
         }
     }
 
-    // Loader Options section anchored to the bottom of the left rail.
+    // Loader Options section, anchored to the bottom of the left rail.
     // Stack (top → bottom):
-    //   LOADER OPTIONS header
-    //   Loader Dir path bar + "..." (ellipse) button
-    //   Stash Tabs dropdown
-    //   Plugins button  (replaces the former Dmg Display dropdown)
-    //
-    // The Plugins button anchors the bottom of the section. Stash Tabs
-    // and the path bar shift upward relative to the prior layout to
-    // make room — net height is roughly the same since Plugins (54 tall)
-    // is taller than the dropdown it replaced (28 tall).
+    //   LOADER OPTIONS header   +   "..." (ellipse) button — same top-Y
+    //   Basic Options button
+    //   Developer Options button
+    //   Plugins button                        (drives the section's bottom)
     {
         constexpr int ELLIPSE_W = 37;     // aspect-correct for 36 tall
         constexpr int ELLIPSE_H = 36;
-        constexpr int BAR_H     = 44;   // path bar height (taller so wrapped paths breathe)
-        constexpr int LOADER_X_NUDGE = 28;   // 10 px right of the centered-in-rail position
-        constexpr int ROW_H_DD  = 28;     // dropdown row height (Stash Tabs)
-        constexpr int PLUGINS_W = 254;    // btn_nexus_update.png native width
-        constexpr int PLUGINS_H = 54;     // btn_nexus_update.png native height
-        constexpr int ROW_GAP   = 6;      // gap between Stash row and Plugins button
-        constexpr int BAR_GAP   = 8;      // gap between path bar and Stash
-        // dirW is constrained by the 300-px bg_loader_options.png frame
-        // (which has ~12 px of bronze border on each side). The path bar
-        // plus 6-px gap plus 37-px ellipse must fit inside the bronze.
+        constexpr int LOADER_X_NUDGE = 28;
+        constexpr int BTN_W     = 254;    // nexus_update asset native width
+        constexpr int BTN_H     = 54;     // nexus_update asset native height
+        constexpr int ROW_GAP   = 3;      // gap between rows (halved v1.4)
+        // Header row geometry (mirrors constants in paint_main.cpp).
+        constexpr int LO_HDR_H   = 40;
+        constexpr int LO_HDR_PAD = 8;     // pad between header and first row
+        // g_loaderDirRect no longer draws a visible path bar; it survives
+        // as a header-anchor rect that paint_main.cpp reads to derive
+        // hdrY. DIR_W is the width of that anchor rect.
+        constexpr int DIR_W = 233;
+
         int navW = LEFT_RAIL_W - COL_PAD * 2 - LOADER_X_NUDGE;
-        int dirW = 233;
         int loaderX = insetL + COL_PAD + LOADER_X_NUDGE;
 
         // Anchor: Plugins button bottom drives the whole block. The
-        // -25 lifts the entire section 25 px above its natural bottom
-        // baseline (matches the prior layout's vertical positioning).
+        // -25 lifts the section 25 px above its natural bottom baseline.
+        // ROW_LIFT lifts the button stack an additional 10 px while
+        // leaving the header where it would have been.
+        constexpr int ROW_LIFT = 10;
         int sectionBot = bodyBot - 8 - 6 - 25;
-        int pluginsBot = sectionBot;
-        int pluginsTop = pluginsBot - PLUGINS_H;
-        int stashBot   = pluginsTop - ROW_GAP;
-        int stashTop   = stashBot - ROW_H_DD;
-        int barBot     = stashTop - BAR_GAP;
-        int barTop     = barBot - BAR_H;
 
-        // Loader Dir path bar
-        g_loaderDirRect = { loaderX, barTop, loaderX + dirW, barBot };
+        // Header anchor: computed from where the top button would sit
+        // WITHOUT ROW_LIFT, so the header keeps its original Y.
+        int basicTopUnlifted =
+            sectionBot - BTN_H - ROW_GAP - BTN_H - ROW_GAP - BTN_H;
+        int hdrY = basicTopUnlifted - LO_HDR_PAD - LO_HDR_H;
 
-        // Ellipse button vertically centered on the path bar.
-        int ellipseY = barTop + (BAR_H - ELLIPSE_H) / 2;
+        // Button positions — everything below the header shifts up by
+        // ROW_LIFT. All three buttons are the same nexus_update-style
+        // artwork (254×54) with hover glow and click shrink.
+        int pluginsBot = sectionBot - ROW_LIFT;
+        int pluginsTop = pluginsBot - BTN_H;
+        int devBot     = pluginsTop - ROW_GAP;
+        int devTop     = devBot - BTN_H;
+        int basicBot   = devTop - ROW_GAP;
+        int basicTop   = basicBot - BTN_H;
+
+        // Header-anchor rect. paint_main.cpp reads .top as
+        //     hdrY = g_loaderDirRect.top - LO_HDR_PAD - LO_HDR_H
+        // so it must match basicTopUnlifted to keep the header put.
+        g_loaderDirRect = { loaderX, basicTopUnlifted,
+                            loaderX + DIR_W, basicTopUnlifted };
+
+        // Legacy rects — kept zeroed. Phase 4 replaced these painted
+        // rows with real HWND buttons above, so no paint or hit-test
+        // code should be reading these anymore. Zeroed so any residual
+        // hit-test that missed the migration silently no-ops.
+        g_stashDropdownRect = { 0, 0, 0, 0 };
+        g_showSocketsRect   = { 0, 0, 0, 0 };
+
+        // Ellipse button — right-aligned inside the Loader Options
+        // panel with a small pad, so it never collides with the
+        // LOADER OPTIONS header text regardless of UI scale. Y is
+        // vertically centered on the header row.
+        int ellipseX = loaderX + navW - ELLIPSE_W - 6;
+        int ellipseY = hdrY + (LO_HDR_H - ELLIPSE_H) / 2;
         if (g_hwLoaderDirBtn)
             SPosL(g_hwLoaderDirBtn, nullptr,
-                         loaderX + dirW + 6, ellipseY,
-                         ELLIPSE_W, ELLIPSE_H, SWP_NOZORDER);
+                         ellipseX, ellipseY, ELLIPSE_W, ELLIPSE_H, SWP_NOZORDER);
 
-        // Stash Tabs row rect — paint code reads this to draw the dropdown.
-        g_stashDropdownRect = { loaderX, stashTop, loaderX + navW, stashBot };
-
-        // Plugins button — centered horizontally in the Loader Options
-        // column. Native 254×54 art; no overflow pad (the Plugins kind
-        // has no hover-grow, so the HWND fits the art exactly).
+        // The three stacked buttons — Basic Options, Developer Options,
+        // Plugins. All are centered horizontally in the Loader Options
+        // column and use the same native 254×54 nexus_update artwork.
+        int btnX = loaderX + (navW - BTN_W) / 2;
+        if (g_hwLoaderBasicOptions) {
+            SPosL(g_hwLoaderBasicOptions, nullptr,
+                         btnX, basicTop, BTN_W, BTN_H,
+                         SWP_NOZORDER);
+        }
+        if (g_hwLoaderDevOptions) {
+            SPosL(g_hwLoaderDevOptions, nullptr,
+                         btnX, devTop, BTN_W, BTN_H,
+                         SWP_NOZORDER);
+        }
         if (g_hwLoaderPlugins) {
-            int pluginsX = loaderX + (navW - PLUGINS_W) / 2;
             SPosL(g_hwLoaderPlugins, nullptr,
-                         pluginsX, pluginsTop, PLUGINS_W, PLUGINS_H,
+                         btnX, pluginsTop, BTN_W, BTN_H,
                          SWP_NOZORDER);
         }
     }

@@ -68,7 +68,7 @@
 #include "angiris_common.h"
 #include "core.h"
 #include "version.h"
-#include "ini_editor.h"
+#include "config_editor.h"
 #include "http.h"
 #include "config.h"
 #include "update_cache.h"
@@ -92,6 +92,9 @@
 #include "hover_tip.h"
 #include "mod_list.h"
 #include "plugin_manager.h"
+#include "loader_options_modal.h"   // ShowBasicOptionsModal — Phase 3 preview trigger
+#include "plugin_config.h"     // v1.3: per-mod plugin manifest + globals-disable sweep
+#include "plugin_manifest.h"   // v1.3: launcher-wide DLL friendly name map
 #include "control_ids.h"
 #include "dialogs.h"
 #include "paint_helpers.h"
@@ -110,9 +113,7 @@
 //  All colors and spacing live here — extend this block, never inline.
 // ═══════════════════════════════════════════════════════════════════════
 
-// (extracted to module — was GP/GPA color helpers)
 
-// (extracted to module — was Tok:: + Sp:: namespaces)
 
 // ═══════════════════════════════════════════════════════════════════════
 //  DPI / USER-SCALE PLUMBING
@@ -137,10 +138,8 @@
 // visible UI is unchanged until later stages wire CreateWindow, fonts, and
 // Layout() through S() / SF().
 
-// (extracted to module — was g_userScale + g_scale globals)
 
 // Logical → physical.
-// (extracted to module — was S/SF/U inline functions)
 
 // SetWindowPos that takes LOGICAL coords/sizes and applies S() at the
 // Win32 boundary. Use this everywhere in Layout() so the layout math
@@ -148,7 +147,6 @@
 // applied uniformly. Mouse handlers and Layout never have to know
 // about g_scale individually.
 // SPosL extracted to scaling.h so layout.cpp + other TUs can use it.
-// (extracted to module — was InvalidateRectL + GetClientRectL helpers)
 
 // Per-monitor V2 DPI awareness if available, falling back to per-monitor V1,
 // then system-aware. Must be called before the first window is created.
@@ -237,18 +235,13 @@ double QuerySystemDpiScale() {
 // Ignore. The Update path downloads the release zip, renames the
 // running .exe to .old, extracts the new files in place, and spawns
 // the new process — see the long comment near LauncherUpdateInstallWorker.
-// (extracted to module — was LAUNCHER_VERSION constant)
-// (extracted to module — was LAUNCHER_GITHUB_OWNER/REPO)
 
-// (extracted to module — was launcher self-update state globals)
 
 // ── Version label hit-rect (paint state, NOT launcher-update state) ─────
 // Filled by PaintBody when it lays out the version label under the
 // logo; read by MainProc's WM_LBUTTONDOWN / WM_SETCURSOR to hit-test
 // the clickable area. Stays in Angiris.cpp because it's a paint
-// concern, not part of the self-update module's state. Was
-// accidentally swept up in Phase 3b's anchor-pair removal of the
-// launcher_self_update globals — restored here.
+// concern, not part of the self-update module's state.
 RECT g_versionLabelRect = {0, 0, 0, 0};
 
 // ModSettings struct and g_modSettings now live in launch_flags.h/cpp.
@@ -275,7 +268,6 @@ RECT g_versionLabelRect = {0, 0, 0, 0};
 DWORD   g_d2rGameStartTick = 0;
 wstring g_d2rGameModFolder;
 
-// (extracted to module — was UPDATE_* constants + MSG_UPDATE_CHECK_DONE)
 
 // ── Drag-and-drop zip install (V1.1) ─────────────────────────────────────
 // User drops one or more .zip files onto the launcher window. A worker
@@ -290,9 +282,7 @@ wstring g_d2rGameModFolder;
 //   restrictions), hence the SendMessage round-trip.
 // MSG_ZIP_QUEUE_DONE: worker→main, PostMessage. Triggers a final
 //   RefreshMods + repaint after all queued zips have been processed.
-// (extracted to module — was MSG_ZIP_* and MSG_LAUNCHER/LUPOPUP constants)
 
-// (extracted to module — was ConflictDialogParam + ProgressUpdate)
 
 // D2R process tracking for the post-launch Minimize/Close behaviors.
 // The process handle is kept alive for polling when minimize is chosen.
@@ -359,13 +349,7 @@ const wchar_t* const k_d2rProcessNames[] = {
 const size_t k_d2rProcessNameCount =
     sizeof(k_d2rProcessNames) / sizeof(k_d2rProcessNames[0]);
 constexpr UINT IDT_D2R_POLL = 9101;         // 1s timer fired on the main HWND
-// (extracted to module — was IDT_HOVER_TIP constant)        // 2s timer on the mod list HWND;
-                                            //   fires the playtime tooltip
-                                            //   if the cursor's been still
-                                            //   over a row long enough.
-// (extracted to module — was IDT_CLEANUP_OLD_EXE)
 
-// (extracted to module — was .old cleanup state globals)
 
 // Discord Rich Presence integration is held back pending the Discord
 // application review process — the IPC code lives in a separate module
@@ -377,7 +361,6 @@ constexpr UINT IDT_D2R_POLL = 9101;         // 1s timer fired on the main HWND
 // the path changes — repeated paints of the same banner are free.
 // (Now used by the mod list rows, which render banners as backgrounds.)
 namespace Gdiplus { class Bitmap; }
-// (extracted to module — was g_bannerCache + g_bannerCacheKey)
 
 // ═══════════════════════════════════════════════════════════════════════
 //  GLOBALS
@@ -397,9 +380,10 @@ HWND        g_hwModDiscord = nullptr;
 HWND        g_hwModDocs    = nullptr;
 HWND        g_hwModWebsite = nullptr;
 
-// Left rail navigation buttons (open external paths/files)
+// Left rail navigation buttons (open external paths/files). Options was
+// removed — settings live in the Basic/Developer Options modals in the
+// Loader Options section, and D2RLoader.toml can be hand-edited.
 HWND        g_hwNavMods    = nullptr;
-HWND        g_hwNavOptions = nullptr;
 HWND        g_hwNavLogs    = nullptr;
 HWND        g_hwNavHelp    = nullptr;
 HWND        g_hwNavAbout   = nullptr;
@@ -408,6 +392,7 @@ HWND        g_hwNavExit    = nullptr;
 // Loader Directory row (read-only path + ... browse button)
 RECT        g_loaderDirRect = {};            // paint+hit-test rect for the path bar
 RECT        g_stashDropdownRect = {};         // Stash Tabs row rect (Layout populates)
+RECT        g_showSocketsRect   = {};         // v1.3: Show Sockets row rect + toggle click target
 // g_dmgDropdownRect removed — the Dmg Display dropdown was replaced by
 // the Plugins button (g_hwLoaderPlugins) in the Loader Options layout.
 
@@ -429,6 +414,8 @@ RECT        g_fontDropdownRect  = {};
 RECT        g_colorDropdownRect = {};
 HWND        g_hwLoaderDirBtn = nullptr;     // "..." button
 HWND        g_hwLoaderPlugins = nullptr;    // Plugins button — opens plugin manager
+HWND        g_hwLoaderBasicOptions = nullptr;  // Basic Options button
+HWND        g_hwLoaderDevOptions   = nullptr;  // Developer Options button
 
 // Mod list adjacent buttons
 HWND        g_hwRefresh    = nullptr;       // top-right "Refresh"
@@ -438,8 +425,8 @@ HWND        g_hwUpdateMod  = nullptr;       // bottom-right
 // Bottom expansion panel
 HWND        g_hwExpandToggle = nullptr;     // arrow button
 // `g_bottomExpanded` is exposed via core.h so buttons.cpp's Arrow paint
-// can flip the chevron art and paint_main / layout (Phase 7c+) can read
-// the same flag without a re-entry into MainProc.
+// can flip the chevron art and paint_main / layout can read the same
+// flag without a re-entry into MainProc.
 bool        g_bottomExpanded = false;
 
 // Custom title-bar button state (rendered as image assets in PaintBody;
@@ -470,13 +457,8 @@ int         g_tbPressed  = -1;
 // (ButtonKind enum extracted to buttons.h)
 #include "buttons.h"
 
-// (extracted to module — was ButtonStateTransform + StateTransformFor + AssetNameFor)
-// (extracted to module — was AssetNameFor body)
-// (extracted to module — was ButtonState struct + g_btnStates)
 
-// (extracted to module — was BtnHoverSubclass)
 
-// (extracted to module — was RegisterButton)
 
 HWND        g_hwBottomTools[6]   = {};      // 6 tool launchers
 HWND        g_hwBottomRefs[3]    = {};      // 3 references
@@ -490,7 +472,6 @@ static ULONG_PTR   g_gdipToken    = 0;
 
 // Bundled fonts — loaded from assets/fonts/ at startup with FR_PRIVATE
 // so they're visible to GDI+ but not added to the system font list.
-// (extracted to module — was g_loadedFonts)
 
 // Persistent PrivateFontCollection holding every bundled .ttf for the
 // app's lifetime. Originally LoadFonts used a throwaway local PFC per
@@ -502,12 +483,10 @@ static ULONG_PTR   g_gdipToken    = 0;
 // every user pick. Keeping the PFC alive lets us pass &g_pfc as the
 // FontCollection arg to FontFamily, which guarantees the lookup
 // resolves the font we just added.
-// (extracted to module — was g_pfc + g_ff* + g_userFont*)
 
 // Cached GDI+ Font instances at the design sizes. Exocet (D2 menu font)
 // carries the launcher's identity; Georgia is used where dense legibility
 // matters (cmd preview, mod description body, hero meta italics).
-// (extracted to module — was g_f* font globals)   // Georgia, 11px
 
 // ═══════════════════════════════════════════════════════════════════════
 //  UTILITIES (carried from D2R_ModLauncher.cpp — proven working)
@@ -527,7 +506,6 @@ static ULONG_PTR   g_gdipToken    = 0;
 //
 //  Cached images are owned by the cache (do not delete the returned ptr).
 
-// (extracted to module — was Asset cache + DrawAssetAt/Stretched/9Slice)
 
 // (DrawAssetAt + DrawButton9Slice extracted to assets.cpp — leftover removed)
 
@@ -538,7 +516,6 @@ static ULONG_PTR   g_gdipToken    = 0;
 //
 // Cached per-asset by name. Once computed it's reused for the life of the
 // process (no need to re-scan a 1536×1024 bitmap on every paint).
-// (extracted to module — was FrameInset + MeasureFrameInset)
 
 // Measures the three internal region boundaries of frame_panel_right.png
 // (the right-column panel asset). The asset has horizontal dividers at
@@ -549,7 +526,6 @@ static ULONG_PTR   g_gdipToken    = 0;
 //
 // All values are in the asset's native pixel space (not stretched), since
 // the asset itself is drawn at 1:1 in the launcher.
-// (extracted to module — was PanelRegions + MeasurePanelRegions)
 
 // Mod-link resolver. modinfo.json's documents/website/discord fields
 // can hold a URL, an absolute path, or a path relative to the mod folder.
@@ -584,17 +560,17 @@ static wstring ResolveModLink(const wstring& field, const wstring& modDir) {
 // JsonDouble now live in core.cpp. See core.h.
 
 // ═══════════════════════════════════════════════════════════════════════
-//  INI LINE-EDITOR
+//  INI / TOML LINE-EDITOR
 // ═══════════════════════════════════════════════════════════════════════
 //
-//  D2RLoader.ini contains user-managed config that we should NOT trash
-//  when we touch one of its values. These helpers do line-by-line in-place
-//  edits: read preserves the full file as-is, write replaces ONLY the
-//  line(s) for the key(s) we care about while keeping every comment,
-//  blank line, and unknown key untouched.
+//  D2RLoader.toml and any other config files we touch are user-managed —
+//  we must not trash comments or unrelated keys when writing a value.
+//  These helpers do line-by-line in-place edits: read preserves the file
+//  as-is, write replaces ONLY the target line while keeping every
+//  comment, blank line, and unknown key untouched.
 
-// TrimWs, ParseIniLine, IniGetInt, IniSetInt now live in ini_editor.cpp.
-// See ini_editor.h.
+// TrimWs, ParseIniLine, IniGetInt, IniSetInt now live in config_editor.cpp.
+// See config_editor.h.
 
 // ═══════════════════════════════════════════════════════════════════════
 //  CONFIG I/O
@@ -603,51 +579,119 @@ static wstring ResolveModLink(const wstring& field, const wstring& modDir) {
 // CfgPath, LoadCfg, SaveCfg now live in config.cpp. See config.h.
 
 // ══════════════════════════════════════════════════════════════════════
-//  D2RLOADER.INI INTEGRATION
+//  D2RLOADER.TOML INTEGRATION
 // ══════════════════════════════════════════════════════════════════════
 //
-// We expose two D2RLoader.ini settings via dropdowns in a "LOADER OPTIONS"
-// section at the bottom of the Modding column:
-//   [Stash]            extra_shared_tabs  (0..16)
-//   [Advanced.Logging] damage_indicator   (0..2)
-//
-// State lives in g_loaderOpts (mirror of what's on disk). LoadLoaderOpts
-// reads from D2RLoader.ini at startup; the dropdowns write through
-// SaveLoaderOpts which does an in-place line edit (preserves the rest
-// of the file). These settings are global (not per-mod) because the
-// loader's INI is shared across all mods.
+// D2RLoader beta 1.0 replaced D2RLoader.ini with D2RLoader.toml and
+// reorganised every key under new dotted sections. State lives in
+// g_loaderOpts (mirror of what's on disk). LoadLoaderOpts reads the
+// toml at startup; the Basic Options / Developer Options modals write
+// through SaveTomlBool / SaveTomlInt which do in-place line edits
+// (preserving comments and unrelated keys). These settings are global
+// (not per-mod) because the loader's toml is shared across all mods.
 
 
 // (LoaderOpts struct moved to ui_state.h)
 LoaderOpts g_loaderOpts;
 
-static wstring LoaderIniPath() {
-    return g_cfg.d2rPath + L"\\D2RLoader.ini";
+wstring LoaderTomlPath() {
+    return g_cfg.d2rPath + L"\\D2RLoader.toml";
+}
+
+// Read a TOML boolean. TOML bools are bare tokens (`true` / `false`,
+// case-sensitive per spec, but we accept any case). Any other value or
+// a missing key returns `def`.
+static bool TomlGetBool(const wstring& path, const wstring& section,
+                        const wstring& key, bool def) {
+    wstring v = IniGetStr(path, section, key, def ? L"true" : L"false");
+    if (v.size() == 4) {
+        wchar_t c0 = v[0], c1 = v[1], c2 = v[2], c3 = v[3];
+        if (c0 >= L'A' && c0 <= L'Z') c0 = (wchar_t)(c0 - L'A' + L'a');
+        if (c1 >= L'A' && c1 <= L'Z') c1 = (wchar_t)(c1 - L'A' + L'a');
+        if (c2 >= L'A' && c2 <= L'Z') c2 = (wchar_t)(c2 - L'A' + L'a');
+        if (c3 >= L'A' && c3 <= L'Z') c3 = (wchar_t)(c3 - L'A' + L'a');
+        return (c0 == L't' && c1 == L'r' && c2 == L'u' && c3 == L'e');
+    }
+    return false;
+}
+
+// Save helpers. Toml bools are bare tokens (no quotes); ints likewise
+// bare. Strings would need surrounding quotes — we don't currently write
+// any user-editable strings.
+// Non-static so the Loader Options modals can call them directly.
+void SaveTomlBool(const wchar_t* section, const wchar_t* key, bool v) {
+    IniSetStr(LoaderTomlPath(), section, key, v ? L"true" : L"false");
+}
+void SaveTomlInt(const wchar_t* section, const wchar_t* key, int v) {
+    IniSetInt(LoaderTomlPath(), section, key, v);
 }
 
 static void LoadLoaderOpts() {
-    wstring p = LoaderIniPath();
-    g_loaderOpts.extraSharedTabs =
-        IniGetInt(p, L"Stash",             L"extra_shared_tabs", 0);
-    g_loaderOpts.damageIndicator =
-        IniGetInt(p, L"Advanced.Logging",  L"damage_indicator",  2);
+    wstring p = LoaderTomlPath();
 
-    // Clamp to sane ranges in case the file holds something weird
-    if (g_loaderOpts.extraSharedTabs < 0)  g_loaderOpts.extraSharedTabs = 0;
-    if (g_loaderOpts.extraSharedTabs > 16) g_loaderOpts.extraSharedTabs = 16;
-    if (g_loaderOpts.damageIndicator < 0)  g_loaderOpts.damageIndicator = 0;
-    if (g_loaderOpts.damageIndicator > 2)  g_loaderOpts.damageIndicator = 2;
+    // [d2rcore.items]
+    g_loaderOpts.showGroundSockets =
+        TomlGetBool(p, L"d2rcore.items",   L"show_ground_sockets",  false);
+    g_loaderOpts.displayItemLevels =
+        TomlGetBool(p, L"d2rcore.items",   L"display_item_levels",  false);
+
+    // [d2rcore.player]
+    g_loaderOpts.enableRespec =
+        TomlGetBool(p, L"d2rcore.player",  L"enable_respec",        false);
+
+    // [d2rcore.stash]
+    g_loaderOpts.addSharedTabs =
+        IniGetInt(p,   L"d2rcore.stash",   L"add_shared_tabs",      0);
+    g_loaderOpts.setMaterialsLimit =
+        IniGetInt(p,   L"d2rcore.stash",   L"set_materials_limit",  99);
+
+    // [d2rloader]
+    g_loaderOpts.showTcpipButton =
+        TomlGetBool(p, L"d2rloader",       L"show_tcpip_button",    false);
+
+    // [d2rloader.developer]
+    g_loaderOpts.enableConsole =
+        TomlGetBool(p, L"d2rloader.developer", L"enable_console",     false);
+    g_loaderOpts.assertDialogMode =
+        TomlGetBool(p, L"d2rloader.developer", L"assert_dialog_mode", false);
+
+    // [d2rloader.developer.logs]
+    g_loaderOpts.logsEnabled =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"enabled",        false);
+    g_loaderOpts.logJsonResources =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"json_resources", false);
+    g_loaderOpts.logWidgetPanels =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"widget_panels",  false);
+    g_loaderOpts.logExcelFiles =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"excel_files",    false);
+    g_loaderOpts.logFonts =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"fonts",          false);
+    g_loaderOpts.logSprites =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"sprites",        false);
+    g_loaderOpts.logChatMessages =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"chat_messages",  false);
+    g_loaderOpts.logModels =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"models",         false);
+
+    // Clamp integer ranges to sane values in case the file was
+    // hand-edited to something the launcher UI can't produce.
+    if (g_loaderOpts.addSharedTabs     < 0)   g_loaderOpts.addSharedTabs     = 0;
+    if (g_loaderOpts.addSharedTabs     > 16)  g_loaderOpts.addSharedTabs     = 16;
+    if (g_loaderOpts.setMaterialsLimit < 0)   g_loaderOpts.setMaterialsLimit = 0;
+    if (g_loaderOpts.setMaterialsLimit > 255) g_loaderOpts.setMaterialsLimit = 255;
 }
 
-static void SaveLoaderOptStashTabs(int v) {
-    IniSetInt(LoaderIniPath(), L"Stash", L"extra_shared_tabs", v);
+// D2RLoader has two settings that would bypass the launcher's mod picker:
+//   [d2rloader] default_mod       — auto-launches a specific mod on start
+//   [d2rloader] skip_title_screen — bypasses the title screen entry point
+// The launcher is meant to be the entry point for mod selection, so both
+// get forced to neutral values every time the launcher runs. Users can
+// still hand-edit them between launcher sessions; the launcher will just
+// reset them again next start.
+static void EnforceLoaderTomlOwnership() {
+    IniSetStr(LoaderTomlPath(), L"d2rloader", L"default_mod",       L"\"\"");
+    IniSetStr(LoaderTomlPath(), L"d2rloader", L"skip_title_screen", L"false");
 }
-
-// SaveLoaderOptDamageIndicator removed — the Dmg Display UI was
-// replaced by the Plugins button, so there's no longer a UI path
-// that writes [Advanced.Logging] damage_indicator. The value is
-// still read in LoadLoaderOpts so any pre-existing setting from
-// a prior launcher version is preserved silently on disk.
 
 // ══════════════════════════════════════════════════════════════════════
 //  MOD UPDATE CHECKER
@@ -677,11 +721,9 @@ static void SaveLoaderOptStashTabs(int v) {
 // Shown over a mod row after the cursor has rested on it for ~2 s. Hidden
 // on row change, mouse leave, click, or scroll. The display surface is
 // the only consumer of g_playtimes outside the recording path.
-// (extracted to module — was hover tip globals)
 
 // Defined further down the file (after the existing modal dialogs) so
 // these can be called from ModListProc.
-// (extracted to module — was hover tip forward decls)
 
 // ── Version comparison ────────────────────────────────────────────────
 //
@@ -698,7 +740,6 @@ static void SaveLoaderOptStashTabs(int v) {
 // Generic manifest: parse `latest_version`, `changelog`, `download_url`,
 // `source_url`, `release_date`, optional `sha256`.
 
-// (extracted to module — was mod_updates block (Parse* + Fetch* + UpdateFetchWorker + KickUpdateChecks + GetUpdateInfo))
 
 //
 // Persisted to <mod>\Launcher Files\launcher_mod_cfg.json. Each mod has
@@ -840,7 +881,6 @@ static MenuRenderCtx g_menuCtx;
 // next load. ApplyColorChange's range check still protects against
 // out-of-bound indices (falls back to default Gold), so deleting at the
 // end of the list later wouldn't break anything either.
-// (extracted to module — was ColorPreset + g_colorPresets)
 
 // ─────────────────────────────────────────────────────────────────────
 // UI scale presets for the toolbar Scale cycling button. The percentage
@@ -850,19 +890,16 @@ static MenuRenderCtx g_menuCtx;
 // at 150% Windows scaling only the smaller three make sense (anything
 // above 100% would push the launcher past most monitors); at 100% the
 // larger three give the user room to scale up.
-// (extracted to module — was ScalePreset + g_scalePresets)
 
 // Return the indices into g_scalePresets[] that are active under the
 // current g_dpiScale. The boundary is 1.25 — anything at-or-above
 // returns the {75/85/100} subset (typical "150%" Windows scaling),
 // anything below returns the {100/115/127} subset (typical "100%"
 // scaling on a high-pixel-density display).
-// (extracted to module — was ActiveScalePresets)
 
 // Return the slider state (0/1/2) for the current cfg.uiScale. Used
 // both to pick which btn_toggle*.png to render and as the starting
 // index for the cycle-on-click action.
-// (extracted to module — was ScaleToggleState)
 
 // ── On Launch toggle ─────────────────────────────────────────────────────
 // Mirrors the Scale toggle's three-state pattern, but the states map to
@@ -900,11 +937,8 @@ const wchar_t* OnLaunchStateLabel() {
     return L"Min";
 }
 
-// (extracted to module — was TryLoadFont + LoadFonts)
 
-// (extracted to module — was UnloadFonts)
 
-// (extracted to module — was MakeFamily)
 
 // Resolve the user's chosen face (g_cfg.fontName) into a fresh
 // FontFamily + style bits. Called before CreateGdipFonts so the
@@ -1143,7 +1177,6 @@ static void ApplyFontChange() {
 // matching highlight Tok::GoldBright) so every existing paint site
 // picks up the new color the next time it constructs a brush/pen.
 // Called from the Colour popMenu setter.
-// (extracted to module — was ApplyColorChange)
 
 // ═══════════════════════════════════════════════════════════════════════
 //  GDI+ HELPERS
@@ -1152,9 +1185,7 @@ static void ApplyFontChange() {
 // Double-buffered paint into a memory DC, blit to dst on dtor.
 // (MemDC extracted to scaling.h — paint primitive used by multiple TUs)
 
-// (extracted to module — was FillSolid)
 
-// (extracted to module — was DrawGoldText)
 
 // ═══════════════════════════════════════════════════════════════════════
 //  MOD FOLDER WATCHER
@@ -1202,7 +1233,6 @@ static void ApplyFontChange() {
 // CommitTypedSeedToRecents, FindSeedIndexForValue) now lives in seeds.cpp.
 // See seeds.h.
 
-// (extracted to module — was DrawFlagCheckbox)
 
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1449,9 +1479,7 @@ static bool TBPointInDragBand(HWND hw, int x, int y) {
 
 // Shared themed button frame — gold border, dark bg, optional highlight.
 // Used by the refresh button (and by the bottom panel buttons in commit 6).
-// (extracted to module — was OPDrawBtnFrame)
 
-// (extracted to module — was mod list block)
 
 // ═══════════════════════════════════════════════════════════════════════
 //  BODY GEOMETRY + PAINT
@@ -1471,7 +1499,8 @@ static bool TBPointInDragBand(HWND hw, int x, int y) {
 
 LoaderOptHits ComputeLoaderOptRects() {
     LoaderOptHits L = {};
-    L.stash = g_stashDropdownRect;
+    L.stash        = g_stashDropdownRect;
+    L.showSockets  = g_showSocketsRect;    // v1.3
     return L;
 }
 // (extracted to paint_main.cpp — was PaintBody)
@@ -1502,21 +1531,16 @@ LoaderOptHits ComputeLoaderOptRects() {
 // Multiple zips can be queued (drop several at once); each gets its own
 // dialog if it collides. Cancel just skips that zip and moves to the next.
 
-// (extracted to module — was Zip queue state globals)
-// (extracted to module — was progress dialog state globals)
 
 
 // Strip filesystem-reserved characters from a mod name. Spaces and dots
 // are allowed mid-string but trimmed off the trailing edge (Windows
 // rejects directory names ending in either).
-// (extracted to module — was SanitizeModName)
 
-// (extracted to module — was fs_utils existence checks + tar extract)
 
 // BFS for the shallowest modinfo.json in a tree. Picking shallowest
 // handles archives that nest the mod folder one level deep (a very
 // common layout — the zip contains MyMod/modinfo.json, MyMod/data/...).
-// (extracted to module — was FindModinfoJson + ReadModNameFromInfo)
 
 // Recursive tree copy with two modes:
 //   addMissing=true   → standard recursive copy (mkdir as needed, copy
@@ -1527,13 +1551,11 @@ LoaderOptHits ComputeLoaderOptRects() {
 //                       subdirectories; doesn't add new files. The strict
 //                       reading of "Update only overwrites files found in
 //                       the archive that are also found in the folder".
-// (extracted to module — was CopyTreeInto + CopyTreeExcept)
 
 // Keep the most recent `keep` timestamped subfolders in `backupsRoot`;
 // delete the rest. Names follow the YYYY-MM-DD_HHMMSS pattern which
 // sorts correctly as plain strings, so a lexicographic sort puts the
 // oldest at the front of the list.
-// (extracted to module — was save_backup block)
 
 // Forward decls — defined after MainProc so they can directly call into
 // the existing WM_DRAWITEM handler for the dialogs' owner-drawn buttons.
@@ -1541,10 +1563,7 @@ LoaderOptHits ComputeLoaderOptRects() {
 // forward-declare it too — the dialogs create their buttons through it.
 // Defaults stay on the definition only (C++ only allows defaults to be
 // specified once per signature); dialog call sites pass all 9 args.
-// (extracted to module — was MkStdBtn forward decl)
-// (extracted to module — was dialog forward decls)
 
-// (extracted to module — was BaseName + PushProgress)
 
 // ─────────────────────────────────────────────────────────────────────────
 //  LAUNCHER SELF-UPDATE
@@ -1577,7 +1596,6 @@ LoaderOptHits ComputeLoaderOptRects() {
 // before this block in the file, so forward declarations would need
 // to land there anyway.
 
-// (extracted to module — was ShowLauncherUpdateDialog forward decl)
 // Kicks off the install: shows the progress dialog at stage 0 and
 // spawns LauncherUpdateInstallWorker on a background thread. Returns
 // immediately so the UI stays responsive while the install runs.
@@ -1590,7 +1608,6 @@ LoaderOptHits ComputeLoaderOptRects() {
 // URL we saw. Crude but robust enough for a single-asset release
 // flow — we're not parsing the array structure, just substring
 // matching, which keeps us free of nested-object parsing.
-// (extracted to module — was FindReleaseZipUrl)
 
 // Wakes once at startup, fires off the API request, posts the
 // "update available" message if the server confirmed a release. Pure
@@ -1611,7 +1628,6 @@ LoaderOptHits ComputeLoaderOptRects() {
 // response is small enough) the raw body. Open that file to debug why
 // the dialog didn't appear or why the Update button fell back to the
 // browser.
-// (extracted to module — was LauncherUpdateCheckWorker + KickoffLauncherUpdateCheck)
 
 // Tries once to delete Angiris.exe.old (cheap no-op when there isn't one).
 // If the file exists but can't be deleted yet — typically because the
@@ -1621,17 +1637,14 @@ LoaderOptHits ComputeLoaderOptRects() {
 //
 // Called once at wWinMain entry. The deferred retry is then armed by
 // StartDeferredOldExeCleanup() once g_hwMain exists.
-// (extracted to module — was CleanupLauncherOldExe + StartDeferredOldExeCleanup)
 
 // Writes a one-line entry to assets\last_update_install.log explaining
 // why the deferred cleanup gave up. Called only when MoveFileEx is the
 // last resort.
-// (extracted to module — was LogCleanupOldExeGaveUp)
 
 // BFS for the shallowest Angiris.exe in the extracted release. Mirrors
 // FindModinfoJson — release zips may wrap the payload in a
 // "Angiris-vX.Y" folder, so we don't assume a flat layout.
-// (extracted to module — was FindAngirisExeInTree)
 
 // The in-place update sequence — the core trick that makes this work
 // without a separate updater binary:
@@ -1692,11 +1705,8 @@ LoaderOptHits ComputeLoaderOptRects() {
 //   8. Restart button click: spawn new exe + PostMessage WM_CLOSE
 //      on the (hidden) main window to exit cleanly.
 
-// (extracted to module — was Launcher update popup state)
 
-// (extracted to module — was LauncherUpdatePopupProc)
 
-// (extracted to module — was ShowLauncherUpdatePopup)
 
 // Worker thread for the launcher self-update install. Sends three
 // MSG_LUPOPUP_STATUS messages to drive the popup forward (1, 2, 3).
@@ -1708,14 +1718,11 @@ LoaderOptHits ComputeLoaderOptRects() {
 // the launcher self-update worker so we get full visibility into
 // which files are locked when something goes wrong. Returns true iff
 // every file copied successfully.
-// (extracted to module — was CopyTreeIntoLogged)
 
-// (extracted to module — was LauncherUpdateInstallWorker + StartLauncherUpdateInstall)
 
 // Process a single zip end-to-end. Runs on the worker thread. Synchronously
 // calls SendMessage to show the conflict / set-path / no-modinfo dialogs
 // (which run on the UI thread); the worker blocks until the user picks.
-// (extracted to module — was ProcessOneZip + ZipInstallWorker + EnqueueZipsForInstall)
 
 // Show the D2R folder picker (same SHBrowseForFolder used for the
 // Loader Directory "..." button). Returns true if the user picked a
@@ -1742,6 +1749,7 @@ bool PromptForD2RPath(HWND parent) {
         InvalidateRectL(g_hwMain, &g_loaderDirRect, FALSE);
     }
     LoadLoaderOpts();
+    EnforceLoaderTomlOwnership();
     RefreshMods();
     StartModsWatcher();
     return true;
@@ -1984,11 +1992,6 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             ShellExecute(hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             return 0;
         }
-        else if (id == IDC_NAV_OPTIONS) {
-            wstring p = g_cfg.d2rPath + L"\\D2RLoader.ini";
-            ShellExecute(hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-            return 0;
-        }
         else if (id == IDC_NAV_LOGS) {
             wstring p = g_cfg.d2rPath + L"\\logs";
             CreateDirectoryW(p.c_str(), nullptr);
@@ -2018,7 +2021,7 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 
         // ── Plugins button → plugin manager popup ─────────────────────────
         // Opens the manager scoped to the currently selected mod (its
-        // ModName.mpq\Plugins\ folder) plus the global plugins folder
+        // d2rloader\ subfolders) plus the global d2rloader\ folders
         // under D2R. With no mod selected, only globals show.
         else if (id == IDC_LOADER_PLUGINS) {
             const ModInfo* mod = nullptr;
@@ -2026,6 +2029,19 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                 mod = &g_mods[g_selMod];
             }
             ShowPluginManager(hw, mod, g_cfg.d2rPath);
+            return 0;
+        }
+
+        // ── Basic / Developer Options buttons ─────────────────────────────
+        // Both open themed modals that write directly to D2RLoader.toml
+        // (apply-immediately semantics). No mod scoping — loader options
+        // are global.
+        else if (id == IDC_LOADER_BASIC_OPTIONS) {
+            ShowBasicOptionsModal(hw);
+            return 0;
+        }
+        else if (id == IDC_LOADER_DEV_OPTIONS) {
+            ShowDeveloperOptionsModal(hw);
             return 0;
         }
 
@@ -2293,6 +2309,23 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             // hold off the first poll until ~10 s after click.
             DWORD launchClickTick = GetTickCount();
 
+            // v1.3: if the selected mod has a plugin manifest, force all
+            // currently-enabled global plugins into the Disabled folder
+            // before launch. D2RLoader scans the global folder at start;
+            // without this sweep a user could open Plugins on Mod A
+            // (manifest), switch to Mod B (no manifest, re-enable
+            // globals), switch back to Mod A and launch — D2RLoader
+            // would then load those globals alongside Mod A's plugins,
+            // silently violating the manifest's curation. Same sweep
+            // also runs when the Plugins window opens; this is the
+            // launch-time backstop. Silent / best-effort by design.
+            {
+                PluginConfig mf = LoadPluginConfig(g_mods[g_selMod].dir);
+                if (mf.present) {
+                    MoveGlobalPluginsToDisabled(g_cfg.d2rPath);
+                }
+            }
+
             // D2RLoader.exe is the bootstrap shim that injects mod hooks
             // before D2R.exe starts. Mod-aware launches should always go
             // through the loader, not the bare game executable.
@@ -2522,7 +2555,6 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
-// (extracted to module — was MainProc MSG_LUPOPUP_STATUS case)
 
     case MSG_LAUNCHER_UPDATE_AVAILABLE: {
         // Worker thread says a newer release was found on GitHub.
@@ -2892,25 +2924,10 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                          r.right - 1,         r.bottom - 2 };
         };
 
-        if (x >= L.stash.left && x < L.stash.right
-            && y >= L.stash.top && y < L.stash.bottom) {
-            std::vector<std::wstring> labels;
-            for (int v = 0; v <= 16; ++v) {
-                wchar_t b[8]; swprintf(b, 8, L"%d", v);
-                labels.emplace_back(b);
-            }
-            popMenu(loValueBox(L.stash), MenuKind::IntValue,
-                    labels, {}, g_loaderOpts.extraSharedTabs, 80,
-                    +[](int v) {
-                        g_loaderOpts.extraSharedTabs = v;
-                        SaveLoaderOptStashTabs(v);
-                    });
-            return 0;
-        }
-        // DMG Display dropdown click handler removed — the slot is now
-        // occupied by the Plugins button (g_hwLoaderPlugins), which is
-        // a real HWND that delivers WM_COMMAND IDC_LOADER_PLUGINS to us
-        // directly (handled in the IDC_* dispatch below).
+        // Stash Tabs and Show Sockets used to be painted rows here with
+        // custom hit-tests. Phase 4 replaced them with real HWND buttons
+        // (g_hwLoaderBasicOptions + g_hwLoaderDevOptions) that deliver
+        // WM_COMMAND directly, so no hit-testing is required anymore.
 
         // Seed dropdown — clicking the arrow opens a popup combining the
         // 3-slot recents (newest first) with the author-defined presets.
@@ -3579,28 +3596,23 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_SIZE: {
         Layout(LOWORD(lp), HIWORD(lp));
-        return 0;
-    }
-
-    case WM_ACTIVATE: {
-        // Restoring from minimized state, or the window otherwise
-        // becoming active, can leave the owner-draw children (nav
-        // buttons, Nexus/Update, PLAY) showing the BUTTON class's
-        // default light-gray fill for a frame or two before their
-        // WM_DRAWITEM fires — that's the brief "white flash" on
-        // restore. Forcing every descendant to paint synchronously
-        // here closes the window between "shown" and "painted",
-        // so the first frame the user sees is the finished UI rather
-        // than the system default fill underneath.
-        //
-        // We only do this on activation (LOWORD(wp) != WA_INACTIVE);
-        // forcing UPDATENOW during deactivation would burn cycles
-        // for no visible benefit.
-        if (LOWORD(wp) != WA_INACTIVE) {
+        // Restore-from-minimized is the case that needs a full redraw
+        // (owner-draw children would otherwise show the system default
+        // light-gray fill for a frame or two before their WM_DRAWITEM
+        // fires — the classic "white flash" on restore). Alt-tab and
+        // modal-close activations don't need this — Windows already
+        // invalidates only the uncovered region there. Restricting the
+        // heavy redraw to SIZE_RESTORED with a prior minimized state
+        // avoids the full repaint on every focus change.
+        static bool s_wasMinimized = false;
+        if (wp == SIZE_MINIMIZED) {
+            s_wasMinimized = true;
+        } else if (wp == SIZE_RESTORED && s_wasMinimized) {
+            s_wasMinimized = false;
             RedrawWindow(hw, nullptr, nullptr,
                          RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
         }
-        break;
+        return 0;
     }
 
     case WM_DESTROY:
@@ -3616,7 +3628,6 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProc(hw, msg, wp, lp);
 }
 
-// (extracted to module — was all 6 dialog implementations)
 
 // ─────────────────────────────────────────────────────────────────────────
 //  HOVER TOOLTIP  (themed popup — playtime + last played)
@@ -3633,13 +3644,11 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 // stealing focus from whatever the user was interacting with, and
 // WS_EX_TOOLWINDOW keeps it out of the taskbar.
 
-// (extracted to module — was HoverTipProc + Show/HideHoverTip impls)
 
 // ═══════════════════════════════════════════════════════════════════════
 //  CONTROL CREATION
 // ═══════════════════════════════════════════════════════════════════════
 
-// (extracted to module — was MkStdBtn definition)
 
 static void CreateControls(HWND hw) {
     using namespace LO;
@@ -3649,7 +3658,6 @@ static void CreateControls(HWND hw) {
     // Layout() so they track the frame inset; placeholder size below
     // matches the native btn_nav_*.png art (310×76).
     g_hwNavMods    = MkStdBtn(hw, L"Mods",    IDC_NAV_MODS,    0, 0, 310, 76);
-    g_hwNavOptions = MkStdBtn(hw, L"Options", IDC_NAV_OPTIONS, 0, 0, 310, 76);
     g_hwNavLogs    = MkStdBtn(hw, L"Logs",    IDC_NAV_LOGS,    0, 0, 310, 76);
     g_hwNavHelp    = MkStdBtn(hw, L"Help",    IDC_NAV_HELP,    0, 0, 310, 76);
     g_hwNavAbout   = MkStdBtn(hw, L"About",   IDC_NAV_ABOUT,   0, 0, 310, 76);
@@ -3671,6 +3679,16 @@ static void CreateControls(HWND hw) {
     // HWND doesn't need headroom for an animation.
     g_hwLoaderPlugins = MkStdBtn(hw, L"Plugins", IDC_LOADER_PLUGINS,
                                  0, 0, 254, 54, true, ButtonKind::Plugins);
+
+    // Basic + Developer Options — same 254×54 nexus_update-style art
+    // as the Plugins button. Positioned above Plugins in the layout,
+    // wired to open their respective modals via WM_COMMAND below.
+    g_hwLoaderBasicOptions = MkStdBtn(hw, L"Basic Options",
+                                       IDC_LOADER_BASIC_OPTIONS,
+                                       0, 0, 254, 54, true, ButtonKind::Plugins);
+    g_hwLoaderDevOptions   = MkStdBtn(hw, L"Developer Options",
+                                       IDC_LOADER_DEV_OPTIONS,
+                                       0, 0, 254, 54, true, ButtonKind::Plugins);
 
     // ── Center column: Nexus Mod Directory + Update Selected Mod ────────
     // Both buttons share the btn_nexus_update_* asset family (254×54 native).
@@ -3827,6 +3845,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     LoadFonts(g_availableFonts, g_availableFamilies,
               g_availableStyles, g_availableAbbrevs);
     LoadSeedsJson();
+    LoadPluginManifest();      // v1.3: launcher-wide DLL → friendly name map
     UpdateUserFontFromCfg();   // pick up cfg.fontName so CreateGdipFonts uses it
     ApplyColorChange();        // apply cfg.fontColorIdx to Tok::Gold/GoldBright
     CreateGdipFonts();
@@ -3835,12 +3854,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         && GetFileAttributes(g_cfg.d2rPath.c_str()) == INVALID_FILE_ATTRIBUTES)
         g_cfg.d2rPath.clear();
     if (g_cfg.d2rPath.empty()) g_cfg.d2rPath = FindD2RInstall();
-    LoadLoaderOpts();         // reads <D2R>\D2RLoader.ini (missing file = defaults)
+    LoadLoaderOpts();         // reads <D2R>\D2RLoader.toml (missing file = defaults)
+    EnforceLoaderTomlOwnership();
 
-    // Custom child window classes are registered in commits 2-6 as they
-    // come back online. The Loader-options dropdown popup window class is
-    // rebuilt later — for now the dropdowns are click-targets only,
-    // painted by MainProc once that paint code lands in Commit 5.
     RegisterModListClass(hInst);
 
     LoadUpdateCache();

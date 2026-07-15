@@ -102,19 +102,17 @@ static LRESULT CALLBACK BtnHoverSubclass(HWND hw, UINT msg,
     auto it = g_btnStates.find(hw);
     if (it != g_btnStates.end()) {
         ButtonState& st = it->second;
-        // Skip the hover-driven invalidate when the kind has no hover
-        // visual change (scaleHover == 1.0). Otherwise WM_MOUSEMOVE /
-        // WM_MOUSELEAVE schedule a full WM_PAINT just to redraw an
-        // identical frame, and on heavy-asset buttons that paint shows
-        // up as visible jitter. Click-driven repaints still happen
-        // through the normal BS_OWNERDRAW pathway (Windows sends
-        // WM_DRAWITEM with ODS_SELECTED), so the shrink-on-click
-        // behavior is unaffected.
-        bool hoverHasVisual = (StateTransformFor(st.kind).scaleHover != 1.0f);
+        // v1.3: Always invalidate on hover state change. The prior
+        // optimization skipped the repaint for kinds with scaleHover==1.0
+        // on the assumption that those kinds had no hover-visible change
+        // at all — but the text label still gets a Gold → GoldBright
+        // shift on hover (see the label paint below), so skipping the
+        // repaint left the text color stale. Repainting on hover is
+        // cheap for these kinds anyway since there's no transform.
         if (msg == WM_MOUSEMOVE) {
             if (!st.hover) {
                 st.hover = true;
-                if (hoverHasVisual) InvalidateRect(hw, nullptr, FALSE);
+                InvalidateRect(hw, nullptr, FALSE);
             }
             if (!st.tracking) {
                 TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, hw, 0 };
@@ -125,7 +123,7 @@ static LRESULT CALLBACK BtnHoverSubclass(HWND hw, UINT msg,
         else if (msg == WM_MOUSELEAVE) {
             st.hover = false;
             st.tracking = false;
-            if (hoverHasVisual) InvalidateRect(hw, nullptr, FALSE);
+            InvalidateRect(hw, nullptr, FALSE);
         }
         else if (msg == WM_NCDESTROY) {
             g_btnStates.erase(it);

@@ -68,10 +68,10 @@ struct LayoutOverrides {
     std::optional<int>  versionLabelY;
     std::optional<bool> showModdingExpand;
 
-    // Per-button overrides keyed by id string ("mods", "options",
-    // "logs", "help", "about", "exit"). Missing key = no override
-    // for that button; default-constructed NavButtonOverride means
-    // the key was present but both fields were missing.
+    // Per-button overrides keyed by id string ("mods", "logs", "help",
+    // "about", "exit"). Missing key = no override for that button;
+    // default-constructed NavButtonOverride means the key was present
+    // but both fields were missing.
     std::map<wstring, NavButtonOverride> navButtons;
 };
 
@@ -98,9 +98,8 @@ int  LayoutVersionLabelY      (int  defaultY);
 bool LayoutShowModdingExpand  (bool defaultVisible);
 
 // Per-button accessors. `id` is the lowercase button id ("mods",
-// "options", "logs", "help", "about", "exit"). Defaults are
-// `visible=true, enabled=true` — i.e. no override means the button
-// is fully active.
+// "logs", "help", "about", "exit"). Defaults are `visible=true,
+// enabled=true` — i.e. no override means the button is fully active.
 bool LayoutNavButtonVisible(const wchar_t* id, bool defaultVisible = true);
 bool LayoutNavButtonEnabled(const wchar_t* id, bool defaultEnabled = true);
 
@@ -213,11 +212,6 @@ namespace LO {
 // ═══════════════════════════════════════════════════════════════════════
 //  BODY LAYOUT — geometry for the right panel + per-control rects
 // ═══════════════════════════════════════════════════════════════════════
-//
-//  Phase 7c promoted these from Angiris.cpp file-static so paint_main.cpp
-//  can see them. Definitions still live in Angiris.cpp (Phase 7d moves
-//  them here for real); these are just forward decls + the struct
-//  layouts they need.
 
 // Right column overall + MOD DESCRIPTION + LAUNCH OPTIONS panel geometry.
 // Computed from the frame asset's measured inset + panel divider rows by
@@ -254,8 +248,7 @@ constexpr int BODY_FLAG_GRID_ROWS = 3;       // 6 flags = 2 cols × 3 rows
 // frame_panel_left.png at native scale.
 struct LeftPanelGeom { int x, y, w, h; int mainTop, dividerY, bottom; };
 
-// Pure functions of W/H (or B). Definitions in Angiris.cpp for Phase 7c;
-// Phase 7d moves them into layout.cpp.
+// Pure functions of W/H (or B). Consumed by both paint and hit-test.
 BodyLayout    ComputeBodyLayout(int W, int H);
 LeftPanelGeom ComputeLeftPanelGeom(const BodyLayout& B);
 
@@ -308,13 +301,13 @@ constexpr int SEED_COMBO_W = 160;     // total width of input + arrow
 constexpr int SEED_COMBO_H = 26;
 constexpr int SEED_ARROW_W = 24;      // arrow button slice on the right edge
 
-// ── Phase 7d additions: layout orchestration ─────────────────────────
+// ── Layout orchestration ────────────────────────────────────────────
 
 // Position every child window in the main window's client area.
 // Called from WM_SIZE and after any state change that affects which
 // controls are visible (mod selection, bottom-panel expansion, etc.).
-// Reads layout overrides from layout.json (Phase 4b) so per-deployment
-// tweaks can move buttons without recompiling.
+// Reads layout overrides from layout.json so per-deployment tweaks
+// can move buttons without recompiling.
 void Layout(int W, int H);
 
 // Re-do layout in response to the bottom panel toggling open/closed.

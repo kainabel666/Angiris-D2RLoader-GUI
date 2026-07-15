@@ -8,9 +8,9 @@
 //  UpdateInfo is the canonical record describing one mod's update
 //  state — local version, last fetched remote version + manifest
 //  fields, fetched-at timestamp, and the "skipped version" tag.
-//  It's defined here (the persistence layer) because it predates
-//  any consumer; mod_updates (Phase 3) will produce these values
-//  via HTTP fetches, and the paint/dialog code consumes them.
+//  It's defined here (the persistence layer); mod_updates.cpp produces
+//  these values via HTTP fetches, and the paint/dialog code consumes
+//  them.
 //
 //  g_updateInfo is the live map keyed by mod folder name. Cached
 //  entries with a fetchedAt within UPDATE_CACHE_TTL_SECONDS are

@@ -15,8 +15,7 @@
 //    • Font construction at runtime sizes — CreateGdipFonts /
 //      DestroyGdipFonts live in Angiris.cpp because they touch the
 //      g_scale macro (SF) and write the layout-coupled
-//      g_seedLabelLogicalW value. Those move with the paint code
-//      in a later phase.
+//      g_seedLabelLogicalW value.
 //    • The Font dropdown's user-facing array of font picks
 //      (g_availableFonts/Families/Styles/Abbrevs) — toolbar UI
 //      state, stays in Angiris.cpp.

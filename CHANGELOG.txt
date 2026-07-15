@@ -2,8 +2,256 @@ ANGIRIS LAUNCHER — CHANGELOG
 ═══════════════════════════════════════════════════════════════════════
 
 
-V1.2
+V1.4
 ─────────────────────────────────────────────────────────────────────
+
+
+NEW: D2RLoader beta 1.0 compatibility
+
+  D2RLoader beta 1.0 replaced D2RLoader.ini with a TOML file
+  (D2RLoader.toml) and reorganised every configuration key under
+  new nested sections (e.g. [d2rcore.stash], [d2rloader.developer]).
+  Angiris 1.4 reads and writes the new TOML format exclusively —
+  it does NOT fall back to the old .ini.
+
+  Users updating from v1.3 with an existing D2RLoader beta 1.0
+  install: any settings the launcher exposes will be re-created in
+  D2RLoader.toml the first time you change them. Settings the
+  launcher does not surface are left untouched (the launcher only
+  edits the specific keys it owns).
+
+
+NEW: Plugin + patch discovery under d2rloader\
+
+  D2RLoader beta 1.0 moved plugin discovery out of the mod's .mpq
+  folder and into a sibling d2rloader\ folder. It also adds JSON
+  memory patches alongside DLL plugins. New paths:
+
+     <D2R>\d2rloader\plugins\      - global .dll plugins
+     <D2R>\d2rloader\patches\      - global .json patches
+     <D2R>\mods\<Mod>\d2rloader\plugins\   - mod-local plugins
+     <D2R>\mods\<Mod>\d2rloader\patches\   - mod-local patches
+
+  The Plugin Manager now shows plugins (.dll) and patches (.json)
+  side-by-side under the same section headers, discriminated by
+  filename extension. Enable/disable moves the file into a sibling
+  Disabled\ folder the same way plugins were moved in v1.3, but
+  now works for patches too. Friendly names via plugin_manifest.json
+  apply uniformly to both.
+
+  plugin_config.json (per-mod plugin/patch curation) stays at the
+  mod root; its "plugins" array may now list both .dll and .json
+  filenames mixed together — the launcher routes each to the
+  correct destination folder by extension.
+
+
+NEW: Basic Options and Developer Options modals
+
+  Loader Options section is now a three-button stack:
+
+     LOADER OPTIONS  [ ... ]
+     Basic Options            - opens themed popup with 6 settings
+     Developer Options        - opens themed popup with 10 settings
+     Plugins                  - opens the Plugin Manager (unchanged)
+
+  Basic Options exposes:
+     Show Sockets                 [d2rcore.items] show_ground_sockets
+     Show Item Level              [d2rcore.items] display_item_levels
+     Respec Skill/Stats           [d2rcore.player] enable_respec
+     Stash Tabs (0-16 dropdown)   [d2rcore.stash] add_shared_tabs
+     Material Limit (0-255 text)  [d2rcore.stash] set_materials_limit
+     Show TCP/IP Button           [d2rloader] show_tcpip_button
+
+  Developer Options exposes:
+     Enable Console               [d2rloader.developer] enable_console
+     Assert Dialog Message        [d2rloader.developer] assert_dialog_mode
+     Enable Logging               [d2rloader.developer.logs] enabled  (master)
+       JSON Resources             [...] json_resources
+       Widget Panel Creation      [...] widget_panels
+       Excel File Loaded          [...] excel_files
+       True and Open Type Fonts   [...] fonts
+       UI Sprites Creation        [...] sprites
+       Chat Messages              [...] chat_messages
+       Models Creation            [...] models
+
+  The 7 log-detail toggles under Enable Logging are greyed out and
+  inert when the master toggle is off. All settings apply immediately
+  on click; no Save/Cancel dance because D2RLoader only reads the
+  toml at launch anyway.
+
+  Material Limit is a text box (not a dropdown) since the 0-255
+  range is too wide for a menu. A "Default = 99, Max = 255" note
+  below the label documents the range; out-of-range values snap
+  to the nearest bound on focus-loss.
+
+
+CHANGED: Loader Options main-panel restack
+
+  Stash Tabs and Show Sockets are no longer separate rows on the
+  main screen — they moved into Basic Options. In their place, the
+  Loader Options section now hosts three same-height buttons
+  (Basic Options, Developer Options, Plugins) with the "..." folder
+  picker still at the top-right of the section header.
+
+
+CHANGED: Options left-rail nav button removed
+
+  The "Options" nav button (which shell-opened D2RLoader.toml)
+  was removed. Settings live in Basic/Developer Options now; the
+  toml is still hand-editable if you want to touch keys the
+  launcher doesn't expose.
+
+  The left rail now has 5 nav buttons instead of 6, freeing
+  vertical space above the Loader Options section.
+
+
+CHANGED: launcher-enforced defaults on startup
+
+  Every launcher start (and every D2R path change) writes:
+     [d2rloader] default_mod       = ""
+     [d2rloader] skip_title_screen = false
+  These are the two toml keys that would bypass Angiris's mod
+  picker — with default_mod set, D2RLoader would launch straight
+  into that mod, skipping the launcher entirely. Angiris resets
+  them each run so the launcher stays the entry point.
+
+
+
+FIXED: LOADER OPTIONS header clipping with wider font families
+
+  At 150% Windows DPI + heavier fonts (Exocet Med), "LOADER OPTIONS"
+  rendered wider than the header rect and the tail letters were
+  clipped by GDI+. The header now measures the text with the
+  primary font and falls through to smaller fonts if it wouldn't
+  fit, so the label is always rendered whole.
+
+
+FIXED: Full-window repaint on every focus change
+
+  The main window's WM_ACTIVATE handler was calling RedrawWindow
+  with RDW_INVALIDATE | RDW_ALLCHILDREN on every activation —
+  including modal closes, alt-tab back, etc. That caused the whole
+  launcher (assets, buttons, background) to repaint each time.
+  Now the heavy full-redraw only fires when restoring from a
+  minimized state (where the owner-draw buttons would otherwise
+  show default light-gray for a frame); routine activations use
+  the normal partial-invalidation Windows provides.
+
+
+V1.3
+─────────────────────────────────────────────────────────────────────
+
+
+NEW: Per-mod plugin configuration (plugin_config.json)
+
+  Mod authors can ship a plugin_config.json file inside their mod's
+  root folder listing exactly which plugin DLLs the mod expects to
+  use with D2RLoader. When a user selects such a mod:
+
+  * The Plugin Manager window shows the configured plugin list in a
+    read-only "inventory" view — no toggling — with any missing
+    plugins greyed out.
+  * All global plugins are moved to the global Disabled folder while
+    that mod is active, so D2RLoader won't load anything outside the
+    author's curated list.
+  * If a plugin is listed but not in the mod's plugins folder, the
+    launcher auto-recovers it from the global folders or from the
+    mod-local Disabled folder if possible. Globals are copied (so
+    other mods keep working); mod-local disabled entries are moved.
+  * The same globals-to-disabled sweep runs when you press PLAY,
+    closing the loophole where switching between mods could have
+    left globals enabled at launch time.
+
+  If plugin_config.json lists no plugins (an empty array), the
+  Plugin Manager instead shows a centred message:
+        "<Author> has selected to disable plugins for <Mod Name>"
+  Author + mod name come from modinfo.json; a generic fallback is
+  used if either field is missing.
+
+
+NEW: Launcher-wide plugin renaming (plugin_manifest.json)
+
+  A plugin_manifest.json file beside the launcher stores friendly
+  display names for plugin DLL filenames. Every plugin row shows
+  its display name with the DLL filename in parentheses:
+        "D2 LoD Helper (d2lod.dll)"
+
+  * Right-click any plugin row in the Plugin Manager and pick
+    Rename... to enter a new display name. Updates are saved
+    immediately and take effect for every mod that uses that DLL.
+  * The manifest is safely hand-editable — the format is a flat
+    JSON map of "dll_name.dll": "Friendly Name" pairs. Case-
+    insensitive matching means you don't have to worry about
+    capitalisation, and the launcher auto-populates the manifest
+    with empty entries for every plugin DLL it encounters, so you
+    can just open the file in a text editor and fill in names
+    beside the pre-populated keys.
+  * A curated default plugin_manifest.json ships with the launcher.
+
+
+NEW: Show Sockets toggle in Loader Options
+
+  A two-state toggle in the Loader Options section that writes
+  "true" or "false" to [Items] show_ground_sockets in D2RLoader.ini.
+  When on, D2RLoader shows the number of sockets on items on the
+  ground.
+
+
+CHANGED: Loader Options layout
+
+  The Loader Directory text bar was removed to make room for new
+  rows. The "..." button (which picks your D2R install folder) is
+  still there — it moved up next to the LOADER OPTIONS header. Same
+  behaviour, just tighter vertical footprint.
+
+  New stack (top to bottom):
+      LOADER OPTIONS  [ ... ]
+      Stash Tabs                  [ N ▾ ]
+      Show Sockets                [ toggle ]
+      Plugins button (opens the Plugin Manager)
+
+
+CHANGED: Plugin Manager visual reskin
+
+  * Stone-textured background and ornate bronze/gold frame matching
+    the main window's mod list panels.
+  * Buttons use the same nexus-update-style artwork as the main
+    window's Plugins button, with hover glow and click shrink.
+  * Checkboxes now use the same asset family as the Launch Options
+    section.
+  * Section headers ("Global plugins" / "Mod plugins") replace the
+    "(G)" / "(M)" tags that used to appear inline on each row. The
+    Global section is hidden entirely in per-mod-config mode.
+  * The Save/Cancel or Close buttons at the bottom sit further from
+    the list and are a touch taller, so they read as a distinct
+    button row instead of feeling crammed against the last plugin.
+
+
+CHANGED: Rename modal visual style
+
+  Same stone-textured background, ornate frame, and nexus-update
+  buttons as the Plugin Manager. The input field itself is a black
+  well framed by the launcher's text_box artwork.
+
+
+CHANGED: Plugin Manager click behaviour
+
+  Clicking anywhere in a plugin row no longer selects it — only
+  clicking directly on the checkbox toggles the plugin. The
+  selection highlight that used to follow the mouse around is gone
+  entirely, so there's no more distracting flicker as you scan the
+  list.
+
+
+FIXED: Button hover glow was inconsistent
+
+  Buttons that don't grow on hover (Plugins, Refresh, and the
+  new Save/Cancel/OK buttons in the Plugin Manager and Rename
+  modal) now show their gold text glow on hover consistently.
+
+
+V1.2
+─────────────────────────────────────────────────────────────────
 
 
 NEW: Per-mod playtime tracking

@@ -33,7 +33,7 @@ struct ModInfo {
     // Optional modinfo.json fields
     wstring title;         // overrides "name" as the display label
     wstring description;   // short tagline shown on the mod row
-    wstring overview;      // longer description (unused for now)
+    wstring overview;      // longer description (parsed but currently unused)
     wstring version;       // shown in hero meta line
     wstring author;        // shown in hero meta line
     wstring bannerPath;    // resolved banner file path; empty if absent

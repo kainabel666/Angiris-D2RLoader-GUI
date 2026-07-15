@@ -89,6 +89,10 @@ REM           WM_DRAWITEM body) extracted to buttons.cpp
 REM Phase 7b: paint primitives (FillSolid, DrawGoldText, DrawFlagCheckbox,
 REM           OPDrawBtnFrame, PaintTopOrnament, PaintCornerAccents)
 REM           extracted to paint_helpers.cpp
+REM v1.3-A: new plugin_config.cpp (per-mod plugin_config.json loader,
+REM         no UI changes yet -- Phase A of the manifest feature)
+REM v1.3-E1: new plugin_manifest.cpp (launcher-wide DLL friendly name
+REM         lookup loaded from plugin_manifest.json beside the exe)
 REM Phase 7c: big paint functions (PaintBody, PaintLeftRail, PaintModDescription,
 REM           PaintLaunchOptions, PaintBottomPanel, PaintToolbarControl)
 REM           extracted to paint_main.cpp
@@ -106,8 +110,13 @@ REM Windows to "execute" the first .cpp path on each run, which
 REM opened Angiris.cpp in VS Code before the build could start.
 REM The g++ invocation below lists each source file directly.)
 
-REM Sanity check: every required source file must exist
-for %%S in (Angiris.cpp core.cpp version.cpp ini_editor.cpp http.cpp config.cpp update_cache.cpp playtime.cpp seeds.cpp mod_scan.cpp launch_flags.cpp mod_config.cpp tool_resolver.cpp fs_utils.cpp mod_updates.cpp save_backup.cpp zip_install.cpp launcher_self_update.cpp assets.cpp fonts.cpp layout.cpp scaling.cpp colors.cpp hover_tip.cpp mod_list.cpp plugin_manager.cpp dialogs.cpp buttons.cpp paint_helpers.cpp paint_main.cpp) do (
+REM Single source of truth for the compile list. Add or remove a file
+REM once here and it flows to the sanity check, the display, and the
+REM g++ invocation. (Previously three separate lists — always drifted.)
+set "SOURCES=Angiris.cpp core.cpp version.cpp config_editor.cpp http.cpp config.cpp update_cache.cpp playtime.cpp seeds.cpp mod_scan.cpp launch_flags.cpp mod_config.cpp tool_resolver.cpp fs_utils.cpp mod_updates.cpp save_backup.cpp zip_install.cpp launcher_self_update.cpp assets.cpp fonts.cpp layout.cpp scaling.cpp colors.cpp hover_tip.cpp mod_list.cpp plugin_manager.cpp plugin_config.cpp plugin_manifest.cpp loader_options_modal.cpp dialogs.cpp buttons.cpp paint_helpers.cpp paint_main.cpp"
+
+REM Sanity check: every listed source file must exist on disk.
+for %%S in (%SOURCES%) do (
     if not exist "%SRCDIR%%%S" (
         echo [ERROR] Missing source file: %SRCDIR%%%S
         pause
@@ -118,40 +127,14 @@ for %%S in (Angiris.cpp core.cpp version.cpp ini_editor.cpp http.cpp config.cpp 
 set "OUT=%SRCDIR%Angiris.exe"
 set "LOG=%SRCDIR%compile_errors.txt"
 
-echo Sources :
-echo   %SRCDIR%Angiris.cpp
-echo   %SRCDIR%core.cpp
-echo   %SRCDIR%version.cpp
-echo   %SRCDIR%ini_editor.cpp
-echo   %SRCDIR%http.cpp
-echo   %SRCDIR%config.cpp
-echo   %SRCDIR%update_cache.cpp
-echo   %SRCDIR%playtime.cpp
-echo   %SRCDIR%seeds.cpp
-echo   %SRCDIR%mod_scan.cpp
-echo   %SRCDIR%launch_flags.cpp
-echo   %SRCDIR%mod_config.cpp
-echo   %SRCDIR%tool_resolver.cpp
-echo   %SRCDIR%fs_utils.cpp
-echo   %SRCDIR%mod_updates.cpp
-echo   %SRCDIR%save_backup.cpp
-echo   %SRCDIR%zip_install.cpp
-echo   %SRCDIR%launcher_self_update.cpp
-echo   %SRCDIR%assets.cpp
-echo   %SRCDIR%fonts.cpp
-echo   %SRCDIR%layout.cpp
-echo   %SRCDIR%scaling.cpp
-echo   %SRCDIR%colors.cpp
-echo   %SRCDIR%hover_tip.cpp
-echo   %SRCDIR%mod_list.cpp
-echo   %SRCDIR%plugin_manager.cpp
-echo   %SRCDIR%dialogs.cpp
-echo   %SRCDIR%buttons.cpp
-echo   %SRCDIR%paint_helpers.cpp
-echo   %SRCDIR%paint_main.cpp
+REM Count sources for the header line.
+set /a NUM_SOURCES=0
+for %%S in (%SOURCES%) do set /a NUM_SOURCES+=1
+
+echo Sources : !NUM_SOURCES! .cpp files in %SRCDIR%
 echo Output  : %OUT%
 echo.
-echo Compiling... (20-40 seconds)
+echo Compiling... (30-60 seconds)
 echo.
 
 REM -- Step 1: compile the resource script (icon + version info) ------------
@@ -177,37 +160,12 @@ REM -- Step 2: compile + link the C++, including the resource object --------
 echo [2/2] Compiling C++ and linking
 REM -static links libgcc, libstdc++, AND libwinpthread statically in one shot.
 REM Result: a single self-contained exe, no runtime DLLs needed.
-"!GXX!" -O2 -std=c++17 -mwindows -municode ^
-    "%SRCDIR%Angiris.cpp" ^
-    "%SRCDIR%core.cpp" ^
-    "%SRCDIR%version.cpp" ^
-    "%SRCDIR%ini_editor.cpp" ^
-    "%SRCDIR%http.cpp" ^
-    "%SRCDIR%config.cpp" ^
-    "%SRCDIR%update_cache.cpp" ^
-    "%SRCDIR%playtime.cpp" ^
-    "%SRCDIR%seeds.cpp" ^
-    "%SRCDIR%mod_scan.cpp" ^
-    "%SRCDIR%launch_flags.cpp" ^
-    "%SRCDIR%mod_config.cpp" ^
-    "%SRCDIR%tool_resolver.cpp" ^
-    "%SRCDIR%fs_utils.cpp" ^
-    "%SRCDIR%mod_updates.cpp" ^
-    "%SRCDIR%save_backup.cpp" ^
-    "%SRCDIR%zip_install.cpp" ^
-    "%SRCDIR%launcher_self_update.cpp" ^
-    "%SRCDIR%assets.cpp" ^
-    "%SRCDIR%fonts.cpp" ^
-    "%SRCDIR%layout.cpp" ^
-    "%SRCDIR%scaling.cpp" ^
-    "%SRCDIR%colors.cpp" ^
-    "%SRCDIR%hover_tip.cpp" ^
-    "%SRCDIR%mod_list.cpp" ^
-    "%SRCDIR%plugin_manager.cpp" ^
-    "%SRCDIR%dialogs.cpp" ^
-    "%SRCDIR%buttons.cpp" ^
-    "%SRCDIR%paint_helpers.cpp" ^
-    "%SRCDIR%paint_main.cpp" ^
+
+REM Build the quoted source argument list from SOURCES.
+set SRC_ARGS=
+for %%S in (%SOURCES%) do set SRC_ARGS=!SRC_ARGS! "%SRCDIR%%%S"
+
+"!GXX!" -O2 -std=c++17 -mwindows -municode !SRC_ARGS! ^
     "!RES_OBJ!" -o "%OUT%" ^
     -static ^
     -lgdiplus -lcomctl32 -lshell32 -ladvapi32 -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp ^

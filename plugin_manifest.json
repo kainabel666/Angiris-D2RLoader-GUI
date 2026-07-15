@@ -1,0 +1,15 @@
+{
+  "names": {
+    "00pluginpack-shared.dll": "Eezee's Plugin Pack Master",
+    "D2RRedPortalFix.dll": "D2R Red Portal Fix",
+    "D2RWASDCBE80VectorInject.dll": "W A S D Support",
+    "plugin-items.dll": "Eez Item Plugin",
+    "plugin-levels.dll": "Eez's Level Plugin",
+    "plugin-misc.dll": "Eez's Misc Plugin",
+    "plugin-quests.dll": "Eez's Quest Plugin",
+    "plugin-skills.dll": "Eez's Skill Plugin",
+    "resistdisplay.dll": "Display Monster Resists",
+    "TexturePlaceholderMemoryPatch.dll": "",
+    "WhirlwindCTCChance.dll": "Whirlwind CTC Chance"
+  }
+}

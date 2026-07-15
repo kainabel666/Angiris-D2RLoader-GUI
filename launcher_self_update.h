@@ -28,13 +28,12 @@
 //
 //  The "Update available?" themed prompt dialog (the one with the
 //  changelog + Skip/Update/Ignore buttons) stays in Angiris.cpp —
-//  it's themed UI code with deep paint/font/asset dependencies that
-//  will move with the other dialogs in Phase 6.
+//  it's themed UI code with deep paint/font/asset dependencies.
 //
 //  Depends on:
 //    core, http, version, fs_utils
-//    + DestroyAssetCache() and UnloadFonts() (still in Angiris.cpp
-//      until Phase 4, forward-declared in this module's .cpp)
+//    + DestroyAssetCache() and UnloadFonts() (still in Angiris.cpp;
+//      forward-declared in this module's .cpp)
 //
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -56,7 +55,7 @@ constexpr const wchar_t* LAUNCHER_GITHUB_REPO  = L"Angiris-D2RLoader-GUI";
 // `inline constexpr` (C++17 inline variable) so every TU that
 // includes this header sees the same definition without an ODR
 // violation — no separate .cpp definition needed.
-inline constexpr const wchar_t* LAUNCHER_VERSION = L"1.2";
+inline constexpr const wchar_t* LAUNCHER_VERSION = L"1.4";
 
 // ── Worker → UI protocol ─────────────────────────────────────────────
 

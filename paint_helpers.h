@@ -3,10 +3,8 @@
 // ═══════════════════════════════════════════════════════════════════════
 //
 //  Standalone paint primitives + small chrome painters that the main
-//  window's paint code and dialogs share. Extracted from Angiris.cpp
-//  in Phase 7b because each one has clean inputs/outputs (no shared
-//  state with the bigger PaintBody / PaintLeftRail / etc. — those
-//  stay behind for Phase 7c).
+//  window's paint code and dialogs share. Each has clean inputs/outputs
+//  (no shared state with the bigger PaintBody / PaintLeftRail).
 //
 //  Six functions:
 //    FillSolid          — GDI quick-fill (used outside Graphics scope)

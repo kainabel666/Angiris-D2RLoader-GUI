@@ -9,9 +9,7 @@
 // launch_flags.h so paint code and dialogs read the same fields.
 ModSettings g_modSettings;
 
-// "Use Txts" is locked on for now: the current D2RLoader.exe
-// requires it. Toggle this flag back to false once the loader
-// supports running without -txt.
+// "Use Txts" is locked on: D2RLoader.exe requires -txt to launch mods.
 //
 // Order matters: this controls BOTH the visual layout of the 2x3
 // grid AND the order in which flags appear in the launch-args

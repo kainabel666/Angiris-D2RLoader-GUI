@@ -2,15 +2,11 @@
 //  paint_main.cpp — see paint_main.h for the public entry
 // ═══════════════════════════════════════════════════════════════════════
 //
-//  Phase 7c extraction. PaintBody is the public entry point;
-//  PaintLeftRail / PaintModDescription / PaintLaunchOptions /
-//  PaintBottomPanel / PaintToolbarControl / BreakLaunchArgsAtDash
-//  are file-static helpers called by PaintBody.
-//
-//  Many globals are read from Angiris.cpp via ui_state.h and
-//  layout.h. Phase 7d will move the rect-computing code (Layout,
-//  ComputeBodyLayout, etc.) into layout.cpp, eliminating this
-//  read-only coupling.
+//  PaintBody is the public entry point; PaintLeftRail /
+//  PaintModDescription / PaintLaunchOptions / PaintBottomPanel /
+//  PaintToolbarControl / BreakLaunchArgsAtDash are file-static helpers
+//  called by PaintBody. Reads shared state via ui_state.h and
+//  layout.h.
 
 #include "paint_main.h"
 #include "core.h"             // g_hwMain, g_bottomExpanded
@@ -63,47 +59,77 @@ static void PaintLeftRail(Graphics& g, int /*W*/, int /*H*/) {
     // ── Backdrop: bg_loader_options.png ─────────────────────────────────
     // Section stack (top → bottom):
     //   LOADER OPTIONS header
-    //   Loader Dir path bar
-    //   Stash Tabs dropdown
+    //   Stash Tabs dropdown         (v1.3: was Loader Dir path bar)
+    //   Show Sockets toggle         (v1.3: new)
     //   Plugins button   (a real HWND, not painted here)
-    // The backdrop spans from above the header to just below the
-    // Plugins button. Bottom is derived from g_hwLoaderPlugins's
-    // position rather than g_stashDropdownRect so the backdrop
-    // grows to cover the button properly.
+    // v1.3: expanded padding (+15 top, +10 bottom = +25 total vertical)
+    // so the three rows + Plugins button sit comfortably inside the
+    // frame's ornate border. bg_loader_options.png is now blitted via
+    // DrawButton9Slice so the frame's corner ornaments stay pixel-perfect
+    // while the edge strips stretch to the taller footprint.
     constexpr int LO_HDR_H    = 40;
-    constexpr int LO_HDR_PAD  = 8;     // pad between header and path bar
-    constexpr int LO_BG_PADT  = 8;     // breathing room above header
-    constexpr int LO_BG_PADB  = 12;    // breathing room below Plugins button
+    constexpr int LO_HDR_PAD  = 8;     // pad between header and first row
+    constexpr int LO_BG_PADT  = 23;    // breathing room above header
+    constexpr int LO_BG_PADB  = 22;    // breathing room below Plugins button
     int hdrY  = g_loaderDirRect.top - LO_HDR_PAD - LO_HDR_H;
     int bgX = g_loaderDirRect.left - 12;
     int bgY = hdrY - LO_BG_PADT;
     int bgW = 300;     // wider than the content column, but left X stays anchored
-    // Section bottom comes from the Plugins button's HWND rect — convert
-    // to client-rail logical coords via GetWindowRect + ScreenToClient
-    // would be heavy here, so just derive from g_stashDropdownRect plus
-    // the known gap + Plugins art height.
-    int pluginsBot = g_stashDropdownRect.bottom + 6 + 54;
+    // Section bottom = the Plugins button's bottom edge. Derived from
+    // g_loaderDirRect.top (= layout.cpp's basicTopUnlifted) via the same
+    // arithmetic layout uses to place the three stacked buttons:
+    //   basicTopUnlifted → three BTN_H stack with ROW_GAP between,
+    //   then the whole stack shifts up by ROW_LIFT while the header
+    //   stays put. That yields:
+    //       pluginsBot = basicTopUnlifted + 3*BTN_H + 2*ROW_GAP - ROW_LIFT.
+    constexpr int ROW_GAP  = 3;    // must match layout.cpp Loader Options block
+    constexpr int BTN_H    = 54;
+    constexpr int ROW_LIFT = 10;
+    int pluginsBot = g_loaderDirRect.top
+                   + BTN_H + ROW_GAP + BTN_H + ROW_GAP + BTN_H
+                   - ROW_LIFT;
     int bgH = (pluginsBot - hdrY) + LO_BG_PADT + LO_BG_PADB;
     if (Gdiplus::Bitmap* lobg = AssetImage(L"bg_loader_options.png")) {
-        InterpolationMode prev = g.GetInterpolationMode();
-        g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-        g.DrawImage(lobg, bgX, bgY, bgW, bgH);
-        g.SetInterpolationMode(prev);
+        // 9-slice with corner 30 preserves the frame's ornate corners
+        // while allowing the mid strips to stretch to the taller size.
+        DrawButton9Slice(g, lobg, bgX, bgY, bgW, bgH, 30);
     }
 
-    // Header sits above the Loader Dir path bar. NoWrap + a slightly
-    // wider rect (the path bar itself is 233 logical; the header was
-    // wrapping to two lines at 150% DPI × 100% UI scale because the
-    // rendered "LOADER OPTIONS" hits ~250 logical at SF(14) caps).
+    // LOADER OPTIONS header. NoWrap + fixed width means GDI+ CLIPS text
+    // that overflows the rect — at 150% DPI with a heavier font family
+    // (Exocet Med, etc.) the primary g_fColHdrSm (Exocet 16px) can render
+    // "LOADER OPTIONS" wider than 220 logical, causing the tail letters
+    // to disappear. Measure the text at each candidate font and pick
+    // the largest one that fits the available width; this degrades
+    // gracefully across font-family + scale combinations without ever
+    // overlapping the ellipse button to its right.
+    constexpr REAL LO_HDR_AVAIL_W = 220.0f;
+    Gdiplus::Font* headerFont = g_fColHdrSm;
+    {
+        Gdiplus::Font* candidates[] = { g_fColHdrSm, g_fBtn, g_fSubLbl };
+        for (Gdiplus::Font* f : candidates) {
+            if (!f) continue;
+            RectF measured;
+            g.MeasureString(L"LOADER OPTIONS", -1, f,
+                            RectF(0, 0, 10000.0f, 100.0f), &measured);
+            if (measured.Width <= LO_HDR_AVAIL_W) {
+                headerFont = f;
+                break;
+            }
+        }
+    }
+
     StringFormat sfLOHdr;
     sfLOHdr.SetAlignment(StringAlignmentNear);
     sfLOHdr.SetLineAlignment(StringAlignmentCenter);
     sfLOHdr.SetFormatFlags(sfLOHdr.GetFormatFlags() | StringFormatFlagsNoWrap);
-    g.DrawString(L"LOADER OPTIONS", -1, g_fColHdrSm,
-                 RectF((REAL)(g_loaderDirRect.left + 12), (REAL)hdrY,
-                       275.0f,
-                       (REAL)LO_HDR_H),
-                 &sfLOHdr, &gold);
+    if (headerFont) {
+        g.DrawString(L"LOADER OPTIONS", -1, headerFont,
+                     RectF((REAL)(g_loaderDirRect.left + 12), (REAL)hdrY,
+                           LO_HDR_AVAIL_W,
+                           (REAL)LO_HDR_H),
+                     &sfLOHdr, &gold);
+    }
 
     // One dropdown row: "Stash Tabs  [ N  ▾ ]"
     //
@@ -184,38 +210,11 @@ static void PaintLeftRail(Graphics& g, int /*W*/, int /*H*/) {
                          &sfR, &valBr);
         }
     };
-    drawDD(L.stash, L"Stash Tabs",  g_loaderOpts.extraSharedTabs);
-    // DMG Display dropdown removed — the Plugins button (a real HWND)
-    // now occupies the slot it used to fill in the Loader Options stack.
-
-    // ── Loader Dir path bar ─────────────────────────────────────────────
-    // Drawn programmatically (no Win32 HWND). text_box.png as backdrop,
-    // path text rendered with ellipsis trimming so long paths stay readable.
-    {
-        const RECT& r = g_loaderDirRect;
-        int rw = r.right - r.left;
-        int rh = r.bottom - r.top;
-        if (Gdiplus::Bitmap* tb = AssetImage(L"text_box.png")) {
-            InterpolationMode prev = g.GetInterpolationMode();
-            g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-            g.DrawImage(tb, r.left, r.top, rw, rh);
-            g.SetInterpolationMode(prev);
-        } else {
-            SolidBrush bg(Tok::BgDeep);
-            g.FillRectangle(&bg, r.left, r.top, rw, rh);
-            Pen border(Tok::Bronze, 1.0f);
-            g.DrawRectangle(&border, r.left, r.top, rw - 1, rh - 1);
-        }
-        StringFormat sfPath;
-        sfPath.SetAlignment(StringAlignmentNear);
-        sfPath.SetLineAlignment(StringAlignmentCenter);
-        sfPath.SetTrimming(StringTrimmingEllipsisPath);
-        SolidBrush pathBr(Tok::TextParchment);
-        g.DrawString(g_cfg.d2rPath.c_str(), -1, g_fBtn,
-                     RectF((REAL)(r.left + 8), (REAL)r.top,
-                           (REAL)(rw - 16), (REAL)rh),
-                     &sfPath, &pathBr);
-    }
+    // Phase 4 removed the Stash Tabs painted dropdown row and the Show
+    // Sockets painted toggle row from the Loader Options panel. Both
+    // options are now surfaced by the Basic Options modal (opened from
+    // the Basic Options button). drawDD is left defined above since
+    // paint code elsewhere may want a similar helper later.
 }
 
 static void PaintModDescription(Graphics& g, const BodyLayout& B) {
@@ -848,9 +847,7 @@ void PaintBody(HDC hdc, int W, int H) {
 
     // ── Layered backdrop ────────────────────────────────────────────────
     //   1. Stone texture covers the full window (collapsed-state region).
-    //      The expanded bottom area below WIN_H is intentionally left
-    //      unframed for now — a separate frame_expand.png asset will land
-    //      in a later batch.
+    //      The expanded bottom area below WIN_H is intentionally unframed.
     //   2. Frame overlay (ornate filigree, gem ornaments) on top.
     //   3. D2RLOADER logo at native size in the left rail.
     //   4. frame_panel_right.png (the right column's framed three-panel

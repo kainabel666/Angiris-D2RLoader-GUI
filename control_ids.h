@@ -32,15 +32,20 @@ enum {
 
     // Left rail navigation buttons (open external paths / files)
     IDC_NAV_MODS       = 120,
-    IDC_NAV_OPTIONS    = 121,
+    // 121 (was IDC_NAV_OPTIONS) reserved / retired — the Options nav
+    // button was removed; D2RLoader.toml can be edited directly by
+    // the user, and Basic/Developer Options modals cover the settings
+    // that were formerly reachable through this nav slot.
     IDC_NAV_LOGS       = 122,
     IDC_NAV_HELP       = 123,
     IDC_NAV_ABOUT      = 124,
     IDC_NAV_EXIT       = 125,
 
     // Loader Directory: read-only path text + Browse (...) button
-    IDC_LOADER_DIR_BTN = 130,
-    IDC_LOADER_PLUGINS = 131,    // "Plugins" button — opens plugin manager popup
+    IDC_LOADER_DIR_BTN        = 130,
+    IDC_LOADER_PLUGINS        = 131,    // "Plugins" button — opens plugin manager popup
+    IDC_LOADER_BASIC_OPTIONS  = 132,    // opens Basic Options modal
+    IDC_LOADER_DEV_OPTIONS    = 133,    // opens Developer Options modal
 
     // Mod list refresh button (top-right of list column)
     IDC_REFRESH_BTN    = 140,

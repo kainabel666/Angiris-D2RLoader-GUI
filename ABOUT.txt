@@ -46,297 +46,13 @@ installed in your Diablo II: Resurrected folder.
       Scale  - 3-state slider for UI size (DPI-aware preset set)
       Font   - dropdown of bundled .ttf fonts (or whatever's in assets\fonts\)
       Colour - dropdown of 8 accent colors (gold/red/green tones)
-* Loader Options (written straight to D2RLoader.toml):
-      Basic Options       - modal exposing 6 [d2rcore.*] and
-                            [d2rloader] settings including Show Sockets,
-                            Show Item Level, Respec Skill/Stats,
-                            Stash Tabs (0-16), Material Limit (0-255),
-                            and Show TCP/IP Button
-      Developer Options   - modal exposing the [d2rloader.developer]
-                            block: Enable Console, Assert Dialog
-                            Message, Enable Logging (master), plus
-                            7 cascaded log-detail toggles
-      Plugins             - opens the Plugin Manager (see below)
-* Plugin Manager (v1.3+, extended in v1.4):
-      Lists every plugin (.dll) and patch (.json) the launcher finds
-      for the currently-selected mod, grouped by scope (global vs
-      mod-local). Toggle any entry on or off - disabled files get
-      moved to a sibling "Disabled\" folder rather than deleted, so
-      you can flip them back on later. Mods that ship a
-      plugin_config.json declare their own curated plugin+patch set:
-      the Plugin Manager shows that list read-only and the launcher
-      moves your globals out of the way while that mod is active,
-      so nothing outside the author's curated list gets loaded.
-* Plugin/patch friendly names (v1.3+):
-      Right-click any row in the Plugin Manager and pick Rename to
-      set a readable display name for that filename. Names live in a
-      shared plugin_manifest.json beside the launcher and apply to
-      every mod that uses that file. Same manifest covers both DLLs
-      and JSON patches.
+* Loader Options (written straight to D2RLoader.ini):
+      Stash Tabs    - extra shared stash tabs (0-16)
+      Dmg Display   - damage indicator mode (0-2)
 * A collapsible bottom panel (click the arrow) with quick links to modding
   references, your local tools, and tool downloads
 * Live mod-folder watching - install or remove a mod and the Refresh button
   lights up to let you know there's new state to pick up
-
-
-================================================================================
-                      Angiris Launcher  -  BUILD INSTRUCTIONS
-================================================================================
-
-The launcher source is 33 .cpp files (split by concern - UI, layout, paint,
-Windows plumbing, plugin manager, loader-options modals, etc.) plus their
-.h headers and one optional resource script.
-
-Two supported build paths:
-
-  A) MSYS2 / MinGW-w64  (UCRT64)   - the project's primary build
-  B) Visual Studio 2019 or 2022    - works equally well, no source changes
-
-Both produce a single self-contained Angiris.exe with no DLL dependencies.
-
-
---------------------------------------------------------------------------------
-  FILES YOU NEED
---------------------------------------------------------------------------------
-
-Grab the whole source folder. It contains:
-
-    *.cpp / *.h              the launcher source
-    compile_mingw.bat        the MinGW build script - knows the .cpp list
-    angiris.rc               resource script (icon + version info) - optional
-    angiris.ico              the launcher icon - optional, referenced by .rc
-
-The .rc and .ico are optional: leaving them out just gives you an .exe with
-the default Windows icon. Functionality is identical.
-
-The batch script has a single SOURCES variable listing every .cpp file. If
-you add or remove one, edit that one line near the top of compile_mingw.bat
-and it flows to the sanity check, the display, and the g++ command.
-
-
-================================================================================
-  OPTION A:  MSYS2 / MinGW-w64
-================================================================================
-
-This is the build the project uses day-to-day. If you've ever built a
-Windows C++ program with MSYS2 before, you have everything you need.
-
-
-PREREQUISITES
---------------------------------------------------------------------------------
-
-1. Install MSYS2 from https://www.msys2.org/ (run the installer, accept the
-   defaults).
-
-2. Open the "MSYS2 UCRT64" shortcut from your Start menu (NOT "MSYS2 MSYS" -
-   the UCRT64 environment is what the launcher targets).
-
-3. Install the toolchain:
-
-       pacman -S mingw-w64-ucrt-x86_64-gcc
-
-   Accept the prompts. Takes a couple minutes.
-
-4. Confirm it works - from MSYS2 UCRT64:
-
-       g++ --version
-
-   You should see "g++.exe (Rev?, Built by MSYS2 project)" followed by a
-   version number (15.x is typical for current MSYS2).
-
-
-BUILD
---------------------------------------------------------------------------------
-
-Drop compile_mingw.bat in the same folder as the .cpp / .h files and
-double-click it. The script:
-
-  1. Locates g++ - either on PATH, or by scanning drives for an MSYS2 install
-  2. Verifies every listed .cpp source is present in the folder
-  3. Compiles angiris.rc via windres (skipped if no .rc is present)
-  4. Compiles + links every .cpp into a single static Angiris.exe
-
-About 30-60 seconds. On success it prompts to launch the result.
-
-
-WHAT THE SCRIPT DOES (so you can replicate manually)
---------------------------------------------------------------------------------
-
-If you'd rather invoke g++ yourself, the commands are:
-
-    windres -i angiris.rc -O coff -o angiris.res.o
-
-    g++ -O2 -std=c++17 -mwindows -municode ^
-        *.cpp angiris.res.o -o Angiris.exe ^
-        -static ^
-        -lgdiplus -lcomctl32 -lshell32 -ladvapi32 ^
-        -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp
-
-Using *.cpp expands to every source file in the folder - simplest way to
-keep the command in sync with the source list. If you'd rather list them
-individually, copy the SOURCES variable from the top of compile_mingw.bat.
-
-Key flags:
-    -mwindows       Windows GUI subsystem (no console window)
-    -municode       UNICODE / _UNICODE both defined; wmain entry point
-    -static         link libgcc, libstdc++, and libwinpthread statically -
-                    no MinGW DLLs required at runtime
-    -std=c++17      the launcher uses C++17 features
-
-Linked libraries:
-    gdiplus     - the entire painted UI (frames, fonts, images, anti-alias)
-    comctl32    - standard Windows control style hooks
-    shell32     - Drag-and-drop file targeting, ShellExecute, etc.
-    advapi32    - registry access (D2R install path autodetect)
-    comdlg32    - folder-picker dialog
-    shlwapi     - path manipulation helpers
-    ole32, uuid - OLE plumbing pulled in by some shell APIs
-    winhttp     - update checks + launcher self-update download
-
-
-================================================================================
-  OPTION B:  VISUAL STUDIO 2019 / 2022
-================================================================================
-
-VS Community is free for personal and open-source use. Slightly more clicks
-to set up than the MinGW path, but no source changes needed.
-
-
-PREREQUISITES
---------------------------------------------------------------------------------
-
-1. Install Visual Studio Community from
-   https://visualstudio.microsoft.com/vs/community/
-
-2. In the installer, check the "Desktop development with C++" workload.
-   This includes the MSVC compiler, the Windows SDK, and the rest of what
-   you'll need. Other workloads can be left off.
-
-
-CREATE THE PROJECT
---------------------------------------------------------------------------------
-
-1. File -> New -> Project
-2. Pick "Empty Project" (C++ template). Name it whatever you want -
-   "AngirisLauncher" works. Create.
-3. In Solution Explorer (the tree view on the right):
-       Right-click "Source Files" -> Add -> Existing Item, then in the
-            file picker open the launcher source folder and multi-select
-            EVERY .cpp file (Ctrl+A picks them all).
-       Right-click "Header Files" -> Add -> Existing Item, then multi-
-            select EVERY .h file the same way.
-       Right-click "Resource Files" -> Add -> Existing Item -> select
-            angiris.rc  AND  angiris.ico
-4. Open project properties: right-click the project name -> Properties
-   (or press Alt+Enter on the project).
-
-
-CONFIGURE THE PROJECT
---------------------------------------------------------------------------------
-
-At the top of the Properties dialog:
-    Configuration:  All Configurations    (so the settings apply to Debug
-                                          and Release)
-    Platform:       All Platforms          (or pick x64 if you only want
-                                          a 64-bit build)
-
-Then set each of these. The path on the left is the navigation tree in
-the Properties dialog.
-
-    Configuration Properties -> General
-        C++ Language Standard:        ISO C++17 Standard (/std:c++17)
-        Character Set:                Use Unicode Character Set
-
-    Configuration Properties -> C/C++ -> Code Generation
-        Runtime Library:              Multi-threaded (/MT)
-                                      (Release configuration)
-                                      Multi-threaded Debug (/MTd) for Debug.
-        ^^ This is the equivalent of MinGW's -static flag. Statically
-           links the C++ runtime so end users don't need vcredist.
-
-    Configuration Properties -> Linker -> System
-        SubSystem:                    Windows (/SUBSYSTEM:WINDOWS)
-
-    Configuration Properties -> Linker -> Input
-        Additional Dependencies:      add these to the front of the list
-                                      (semicolon-separated):
-
-            gdiplus.lib;comctl32.lib;shell32.lib;advapi32.lib;
-            comdlg32.lib;shlwapi.lib;ole32.lib;uuid.lib;winhttp.lib
-
-
-BUILD
---------------------------------------------------------------------------------
-
-1. Set the configuration dropdown at the top of VS to "Release" and
-   "x64" (or "x86" for a 32-bit build).
-2. Build -> Build Solution  (or press F7, or Ctrl+Shift+B).
-3. Output ends up at:
-       <project folder>\x64\Release\AngirisLauncher.exe
-   (or x86\Release\ depending on platform)
-
-The .rc file is compiled automatically - VS handles rc.exe under the hood
-when the resource is in the project.
-
-
-================================================================================
-  COMMON GOTCHAS
-================================================================================
-
-* "Missing libgcc_s_seh-1.dll" when launching the MinGW build.
-      The build wasn't fully static. Make sure -static is on the g++ command
-      line; the supplied compile_mingw.bat already includes it.
-
-* "[ERROR] Missing source file: <path>\<name>.cpp" from compile_mingw.bat.
-      The batch script's SOURCES list refers to a file that isn't in your
-      folder. Either you're missing a .cpp from a partial checkout, or
-      you're building an older/newer source tree than the script expects.
-      Either sync the folder to a full set or edit the SOURCES line at the
-      top of compile_mingw.bat to match what you have.
-
-* "vcredist missing" / "MSVCP140.dll not found" on the Visual Studio build.
-      The Runtime Library setting was left at /MD (DLL CRT) instead of /MT.
-      Change to /MT and rebuild.
-
-* "Cannot find gdiplus.h" or similar header errors.
-      The Windows SDK isn't installed (Visual Studio) or the UCRT64
-      environment isn't being used (MinGW). Install / re-open the correct
-      environment.
-
-* The .exe runs but has no icon.
-      The .rc didn't get compiled in. For MinGW, make sure windres ran
-      successfully (check compile_errors.txt if the script left one). For
-      VS, make sure angiris.rc was added to the project under Resource
-      Files.
-
-* Antivirus flags the .exe.
-      Unsigned single-file binaries from unknown sources sometimes trigger
-      heuristics. Sign the binary with a code-signing certificate, or
-      submit it to the antivirus vendor's false-positive form, or just
-      tell your users to add an exclusion. There's no fix from the build
-      side.
-
-
-================================================================================
-  NOTES ON MAINTAINING SOURCE COMPATIBILITY
-================================================================================
-
-The launcher source is portable between MinGW UCRT64 and MSVC with no
-preprocessor branches. A few things to keep in mind if you modify it:
-
-* Wide-string printf format specifiers always use %ls, never %s.
-  MinGW's UCRT64 default interprets %s in wide-format calls as a NARROW
-  string (truncates at the first null byte). %ls is unambiguous and works
-  on both compilers.
-
-* The codebase is plain Win32 + GDI+. No third-party libraries pulled in
-  via vcpkg, NuGet, or pacman beyond what ships with the compiler.
-
-* C++17 is the floor. Some pieces (std::filesystem usage in helper code,
-  if-with-init, structured bindings) won't compile under older standards.
-
-
-================================================================================
 
 
 --------------------------------------------------------------------------------
@@ -425,22 +141,15 @@ LEFT RAIL
     Logo, then the version label (clickable when an update is available -
     glows gold to draw your eye), then quick-access buttons:
         Mods    - opens your <D2R>\mods\ folder
+        Options - opens D2RLoader.ini in its default editor
         Logs    - opens your <D2R>\logs\ folder
         Help    - opens this FAQ
         About   - opens this README
         Exit    - closes the launcher
     Loader Options (bottom):
-        "..."               - button next to the LOADER OPTIONS header;
-                              opens the folder picker to change your D2R
-                              install location
-        Basic Options       - opens the Basic Options modal (Show Sockets,
-                              Show Item Level, Respec Skill/Stats, Stash
-                              Tabs, Material Limit, Show TCP/IP Button)
-        Developer Options   - opens the Developer Options modal (Enable
-                              Console, Assert Dialog Message, Enable
-                              Logging + 7 log-detail toggles)
-        Plugins             - opens the Plugin Manager for the currently-
-                              selected mod
+        Loader Directory - read-only path; change it with the "..." button
+        Stash Tabs       - dropdown 0-16 (writes D2RLoader.ini)
+        Dmg Display      - dropdown 0-2 (writes D2RLoader.ini)
 
 CENTER COLUMN
     MODS header + Refresh button
@@ -865,185 +574,19 @@ hover-grow.
 
 
 --------------------------------------------------------------------------------
-  LOADER OPTIONS (D2RLoader.toml)
+  LOADER OPTIONS (D2RLoader.ini)
 --------------------------------------------------------------------------------
 
-The bottom-left LOADER OPTIONS panel is a three-button stack:
+The two dropdowns in the left rail's Loader Options section write directly to
+D2RLoader.ini in your D2R install folder:
 
-    Basic Options      - opens a themed modal with six [d2rcore.*] and
-                         [d2rloader] settings
-    Developer Options  - opens a themed modal with the [d2rloader.developer]
-                         block (10 settings including a master log toggle
-                         and 7 cascaded log-detail sub-toggles)
-    Plugins            - opens the Plugin Manager (see next section)
+    Stash Tabs   -> [Stash] extra_shared_tabs   (0-16)
+    Dmg Display  -> [Advanced.Logging] damage_indicator (0-2)
 
-The "..." button in the section header opens a folder picker for your D2R
-install location. That path lives in launcher_config.json (in the launcher
-folder), not in D2RLoader.toml.
-
-  BASIC OPTIONS
-  -------------
-
-    Show Sockets          -> [d2rcore.items]  show_ground_sockets   (true/false)
-    Show Item Level       -> [d2rcore.items]  display_item_levels   (true/false)
-    Respec Skill/Stats    -> [d2rcore.player] enable_respec         (true/false)
-    Stash Tabs            -> [d2rcore.stash]  add_shared_tabs       (0-16 dropdown)
-    Material Limit        -> [d2rcore.stash]  set_materials_limit   (0-255 text box)
-    Show TCP/IP Button    -> [d2rloader]      show_tcpip_button     (true/false)
-
-  Material Limit is a text box because 0-255 is too wide for a dropdown.
-  A "Default = 99, Max = 255" note under the label documents the range.
-  Values above 99 are D2RLoader-documented as producing undefined behaviour
-  even though the maximum accepted is 255. Out-of-range typing snaps to
-  the nearest bound when the field loses focus.
-
-  DEVELOPER OPTIONS
-  -----------------
-
-    Enable Console            -> [d2rloader.developer] enable_console
-    Assert Dialog Message     -> [d2rloader.developer] assert_dialog_mode
-    Enable Logging            -> [d2rloader.developer.logs] enabled  (master)
-      JSON Resources          -> [d2rloader.developer.logs] json_resources
-      Widget Panel Creation   -> [d2rloader.developer.logs] widget_panels
-      Excel File Loaded       -> [d2rloader.developer.logs] excel_files
-      True and Open Type Fonts-> [d2rloader.developer.logs] fonts
-      UI Sprites Creation     -> [d2rloader.developer.logs] sprites
-      Chat Messages           -> [d2rloader.developer.logs] chat_messages
-      Models Creation         -> [d2rloader.developer.logs] models
-
-  The 7 indented log-detail toggles are inert (greyed-out) when Enable
-  Logging is off. Flipping the master to on makes them live; flipping
-  it back off greys them again — their individual values are preserved
-  in the toml either way, D2RLoader just ignores them without the
-  master.
-
-  APPLY-IMMEDIATELY
-  -----------------
-
-  Both modals apply changes to D2RLoader.toml on every click - there is
-  no Save / Cancel. D2RLoader only reads the toml at launch time, so
-  there's no in-session state to preserve or roll back. Just close the
-  modal when you're done.
-
-  LAUNCHER-OWNED KEYS
-  -------------------
-
-  On every launcher start, two toml keys are force-reset:
-
-    [d2rloader] default_mod       = ""
-    [d2rloader] skip_title_screen = false
-
-  Setting default_mod would tell D2RLoader to auto-launch a specific
-  mod, skipping Angiris's mod picker entirely; skip_title_screen would
-  bypass the D2R title screen. The launcher resets these so it stays
-  the entry point. You can hand-edit them between sessions, but the
-  launcher will reset them again next start.
-
-  These are the only keys Angiris touches without a user action. Every
-  other setting in the toml is left exactly as you (or a hand-editor)
-  left it - even keys the launcher doesn't know about.
-
-
---------------------------------------------------------------------------------
-  PLUGIN MANAGER (v1.3+, extended in v1.4)
---------------------------------------------------------------------------------
-
-D2RLoader-compatible mods can ship .dll plugins that hook into the game
-and .json memory patches that modify runtime data. The Plugin Manager
-(bottom-left "Plugins" button) shows every plugin AND every patch the
-launcher finds for the currently-selected mod, split into two groups:
-
-    Global plugins  - live in <D2R>\d2rloader\plugins\
-                    and <D2R>\d2rloader\patches\
-                    available to every mod
-    Mod plugins     - live in <D2R>\mods\<Mod>\d2rloader\plugins\
-                    and <D2R>\mods\<Mod>\d2rloader\patches\
-                    mod-local only
-
-Each row has a checkbox. Toggling an entry off moves its file into a
-sibling "Disabled\" folder inside plugins\ or patches\ (whichever is
-appropriate for its extension) - nothing is deleted. Toggling back on
-moves it out of Disabled.
-
-Save Selection commits your changes; Cancel closes the window without
-saving.
-
-Right-click any row and pick Rename... to set a friendly display name.
-Names are stored in plugin_manifest.json beside the launcher and apply
-to every mod that references that filename. The Plugin Manager shows
-entries as "Friendly Name (filename.dll)" or "Friendly Name (filename.json)"
-once a name is set - the file extension in parentheses tells you whether
-it's a plugin or a patch.
-
-
-  PER-MOD CONFIGS (plugin_config.json)
-  ------------------------------------
-
-  Mod authors can ship a plugin_config.json file inside the mod's root
-  folder (<D2R>\mods\<ModName>\plugin_config.json) that declares exactly
-  which plugins AND patches the mod is designed to run with. Format:
-
-      {
-          "plugins": [
-              "someplugin.dll",
-              "someplugin_fix.json",
-              "anotherplugin.dll"
-          ]
-      }
-
-  DLL and JSON entries may be mixed in the single "plugins" array —
-  the launcher routes each to the correct destination folder by extension.
-
-  When a mod ships one:
-
-  * The Plugin Manager shows the authored list in read-only inventory mode
-    (no toggles). Missing entries are greyed out.
-
-  * All globally-enabled plugins AND patches get moved to their respective
-    <D2R>\d2rloader\<plugins|patches>\Disabled\ folders for that mod's
-    session, so nothing outside the author's list can load.
-
-  * Any entry listed in the config but missing from the mod's local
-    folder is auto-recovered from the global folders or the mod's
-    Disabled folder if it exists there. Globals are COPIED (so other
-    mods still have them); mod-local Disabled entries are MOVED.
-
-  * The same auto-recovery + globals-to-disabled sweep runs the moment
-    you press PLAY, so switching between mods can never leave stale
-    globals enabled at launch time.
-
-  An empty plugin list ({"plugins": []}) is a valid way for an author to
-  say "this mod ships without plugins or patches" - the Plugin Manager
-  will show a centred message ("<Author> has selected to disable plugins
-  for <Mod>") and your globals will still be swept aside for the session.
-
-
-  PLUGIN NAMES (plugin_manifest.json)
-  -----------------------------------
-
-  plugin_manifest.json lives beside Angiris.exe and stores friendly
-  display names for both plugin DLLs and JSON patches. Format:
-
-      {
-          "names": {
-              "someplugin.dll":       "Some Plugin",
-              "someplugin_fix.json":  "Some Plugin (memory fix)",
-              "anotherplugin.dll":    "Another Plugin"
-          }
-      }
-
-  Two ways to edit:
-
-  * Right-click a plugin/patch row in the Plugin Manager and pick Rename...
-  * Open plugin_manifest.json in a text editor.
-
-  Whenever the Plugin Manager closes, the launcher rewrites the file with
-  any newly-discovered files (plugins or patches) added as empty entries -
-  so opening the manifest in a text editor gives you a ready-made list of
-  every filename the launcher knows about, waiting for you to type in
-  names. Names are matched case-insensitively.
-
-  A curated default plugin_manifest.json ships with the launcher.
+These are global (they apply to all mods) and persist in the INI. The launcher
+edits only those two lines and leaves the rest of the INI - comments and all -
+untouched. If D2RLoader.ini doesn't exist yet, the values default to 0 until
+you change them.
 
 
 --------------------------------------------------------------------------------
@@ -1120,11 +663,8 @@ PER-MOD (inside each mod folder, under "Launcher Files\"):
                           is false, so toggling the checkbox doesn't lose it)
 
 LOADER (in your D2R install folder):
-    D2RLoader.toml      - the launcher edits only the keys it surfaces
-                          via the Basic Options and Developer Options
-                          modals, plus default_mod / skip_title_screen
-                          (force-reset on startup). Everything else in
-                          the toml is left alone.
+    D2RLoader.ini       - the launcher edits only extra_shared_tabs and
+                          damage_indicator; everything else is the loader's.
 
 DIAGNOSTIC LOGS (next to the launcher exe, under assets\):
     last_update_check.log    - what the launcher saw the last time it asked

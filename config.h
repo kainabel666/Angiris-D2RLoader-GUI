@@ -6,9 +6,8 @@
 //  next to the exe. One LauncherCfg instance (g_cfg) holds the live
 //  values; LoadCfg / SaveCfg sync it with disk.
 //
-//  Per-mod config (flags, seed) lives elsewhere — those are tied to
-//  the ModInfo type which hasn't been extracted yet. Phase 3 will
-//  pull mod_scan + per-mod cfg into mod_scan.h.
+//  Per-mod config (flags, seed) lives in mod_scan.h / launch_flags.h
+//  and is tied to the ModInfo type.
 //
 //  Depends on core for ReadTextFile/WriteTextFile/JSON helpers and
 //  the shared g_dpiScale value.

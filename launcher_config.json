@@ -1,6 +1,6 @@
 {
   "d2r_path":             "G:\\Diablo II Resurrected",
-  "last_mod":             "RoW",
+  "last_mod":             "DiabloDeck",
   "tools_dir":            "J:\\Modding HDD\\modding\\Tools+\\D2R Tools",
   "tool_excel":           "E:\\Tools\\AFJ Sheet Editor Pro\\AFJ Sheet Editor Pro.exe",
   "tool_strings":         "E:\\Tools\\VS Code\\Code.exe",
@@ -12,8 +12,8 @@
   "backup_count":         1,
   "backup_saves":         true,
   "backup_saves_prompted": false,
-  "ui_scale":             0.850,
-  "font_name":            "Cinzel-Bold",
+  "ui_scale":             1.000,
+  "font_name":            "Exocet-Blizzard-Medium",
   "font_color":           -1,
   "skipped_launcher_version": "",
   "last_dpi_scale":       1.500

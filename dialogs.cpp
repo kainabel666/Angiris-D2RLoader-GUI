@@ -33,9 +33,8 @@
 // buttons (same asset frames, same hover/click transforms, same gold
 // text treatment).
 
-// SetPath dialog re-uses Angiris.cpp's existing SHBrowseForFolder
-// helper rather than duplicating the picker logic here. Defined in
-// Angiris.cpp; non-static since Phase 7a/7b extraction.
+// SetPath dialog re-uses Angiris.cpp's existing SHBrowseForFolder helper
+// rather than duplicating the picker logic here.
 extern bool PromptForD2RPath(HWND parent);
 
 // ─────────────────────────────────────────────────────────────────────────

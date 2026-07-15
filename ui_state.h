@@ -3,9 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 //
 //  Extern declarations for the file-local UI state in Angiris.cpp that
-//  paint_main.cpp needs to read. Phase 7c introduced this header as a
-//  pragmatic catch-all so the paint extraction could ship without
-//  reorganizing 18 globals across 5+ existing modules.
+//  paint_main.cpp needs to read.
 //
 //  Categories:
 //    Rects computed by Layout, painted by paint code:
@@ -23,15 +21,10 @@
 //      can render the pressed state independent of the OS theme.
 //
 //    LoaderOpts struct (read-only after LoadLoaderOpts at startup):
-//      g_loaderOpts (current loader.ini values for Stash/Damage)
+//      g_loaderOpts (current loader.ini values for Stash/Damage/Sockets)
 //
 //    Font enumeration caches (filled at startup, read by font picker):
 //      g_availableFonts, g_availableAbbrevs
-//
-//  Phase 7d/7e are likely to reshuffle these — for example moving
-//  the seed-input state into a dedicated input module, or the rect
-//  globals into a paint-state struct. Until then, this header is
-//  the single point of access.
 //
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -39,18 +32,44 @@
 
 #include "angiris_common.h"
 
-// LoaderOpts mirrors D2RLoader.ini's [Stash]/[Advanced.Logging] values.
-// Definition lives here so paint code can read g_loaderOpts.extraSharedTabs
-// for the Stash Tabs dropdown without dragging in the larger Angiris.cpp
-// internals. Phase 7d/7e may relocate this to its own module.
+// LoaderOpts mirrors D2RLoader.toml values consumed by the launcher's
+// Loader Options section. Definition lives here so paint code can read
+// g_loaderOpts.* directly without dragging in Angiris.cpp internals.
 struct LoaderOpts {
-    int extraSharedTabs  = 0;     // [Stash] extra_shared_tabs
-    int damageIndicator  = 2;     // [Advanced.Logging] damage_indicator
+    // [d2rcore.items]
+    bool showGroundSockets   = false;
+    bool displayItemLevels   = false;
+
+    // [d2rcore.player]
+    bool enableRespec        = false;
+
+    // [d2rcore.stash]
+    int  addSharedTabs       = 0;     // vanilla=0
+    int  setMaterialsLimit   = 99;    // vanilla=99, max=255
+
+    // [d2rloader]
+    bool showTcpipButton     = false;
+
+    // [d2rloader.developer]
+    bool enableConsole       = false;
+    bool assertDialogMode    = false;
+
+    // [d2rloader.developer.logs] — child toggles are inert unless
+    // logsEnabled is true (D2RLoader treats logsEnabled as the master).
+    bool logsEnabled         = false;
+    bool logJsonResources    = false;
+    bool logWidgetPanels     = false;
+    bool logExcelFiles       = false;
+    bool logFonts            = false;
+    bool logSprites          = false;
+    bool logChatMessages     = false;
+    bool logModels           = false;
 };
 
 // ── Layout-computed rects (set by Layout, read by paint code) ────────
 extern RECT g_loaderDirRect;
 extern RECT g_stashDropdownRect;
+extern RECT g_showSocketsRect;    // v1.3: 2-state toggle (false/true) — [Items] show_ground_sockets
 extern RECT g_colorDropdownRect;
 extern RECT g_fontDropdownRect;
 extern RECT g_scaleDropdownRect;
@@ -69,7 +88,7 @@ extern int  g_seedLabelLogicalW;
 // ── Toolbar pressed state ────────────────────────────────────────────
 extern int  g_tbPressed;
 
-// ── Loader options snapshot (D2RLoader.ini) ──────────────────────────
+// ── Loader options snapshot (D2RLoader.toml) ─────────────────────────
 extern LoaderOpts g_loaderOpts;
 
 // LoaderOptHits bundles the per-row rects for the Loader Options
@@ -78,7 +97,8 @@ extern LoaderOpts g_loaderOpts;
 // this helper aggregates them). Used by both PaintLeftRail and
 // hit-test code in MainProc.
 struct LoaderOptHits {
-    RECT stash;       // "Stash Tabs" row
+    RECT stash;         // "Stash Tabs" row
+    RECT showSockets;   // v1.3: "Show Sockets" row with 2-state toggle
 };
 LoaderOptHits ComputeLoaderOptRects();
 
@@ -115,17 +135,21 @@ extern HWND g_hwModDiscord;
 extern HWND g_hwModDocs;
 extern HWND g_hwModWebsite;
 
-// Left-rail navigation buttons (6 — Mods, Options, Logs, Help, About, Exit)
+// Left-rail navigation buttons (5 — Mods, Logs, Help, About, Exit).
+// Options was removed; use Basic/Developer Options modals in the
+// Loader Options section for settings, or edit D2RLoader.toml
+// directly.
 extern HWND g_hwNavMods;
-extern HWND g_hwNavOptions;
 extern HWND g_hwNavLogs;
 extern HWND g_hwNavHelp;
 extern HWND g_hwNavAbout;
 extern HWND g_hwNavExit;
 
 // Loader Options buttons (path picker + Plugins)
-extern HWND g_hwLoaderDirBtn;     // "..." button beside the loader path bar
-extern HWND g_hwLoaderPlugins;    // "Plugins" button — opens plugin manager
+extern HWND g_hwLoaderDirBtn;         // "..." button beside the loader path bar
+extern HWND g_hwLoaderPlugins;        // "Plugins" button — opens plugin manager
+extern HWND g_hwLoaderBasicOptions;   // "Basic Options" button — opens the modal
+extern HWND g_hwLoaderDevOptions;     // "Developer Options" button — opens the modal
 
 // Mod list area buttons
 extern HWND g_hwRefresh;          // top-right "Refresh"

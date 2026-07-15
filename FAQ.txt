@@ -10,16 +10,16 @@
 
 Q: Where do I install the launcher?
 A: Anywhere. It's fully portable. It only writes to its own folder
-   (launcher_config.json, assets\seeds.json, assets\playtime.json), to the
-   per-mod "Launcher Files\" subfolders, and to D2RLoader.ini in your D2R
-   install.
+   (launcher_config.json, plugin_manifest.json, assets\seeds.json,
+   assets\playtime.json), to the per-mod "Launcher Files\" subfolders, and
+   to D2RLoader.toml in your D2R install.
 
 
 Q: The launcher can't find D2R. What do I do?
 A: At startup the launcher tells you if it couldn't detect your install. Use
-   the "..." button next to the Loader Directory field (bottom-left) and pick
-   your "Diablo II Resurrected" folder (the one containing D2R.exe). The path
-   persists in launcher_config.json.
+   the "..." button in the LOADER OPTIONS section header (bottom-left) and
+   pick your "Diablo II Resurrected" folder (the one containing D2R.exe).
+   The path persists in launcher_config.json.
 
 
 Q: What if my D2R install is on a different drive or an unusual path?
@@ -27,9 +27,12 @@ A: Same answer - use the "..." button and point it at the folder. Any folder
    containing D2R.exe / D2RLoader.exe works.
 
 
-Q: Why can't I type directly into the Loader Directory box?
-A: It's read-only on purpose, to avoid typos that would break mod detection.
-   Change it only through the "..." button, which opens a folder picker.
+Q: Where did the "Options" nav button go?
+A: v1.4 removed the Options nav button. Settings live in the Basic Options
+   and Developer Options modals in the LOADER OPTIONS section now. If you
+   want to hand-edit keys the launcher doesn't surface, open D2RLoader.toml
+   directly with your editor of choice - the launcher only touches specific
+   keys and leaves the rest of the file alone.
 
 
 Q: It says "No Mods Found" at startup.
@@ -47,7 +50,8 @@ Q: My mod isn't appearing in the list.
 A: Check three things:
    1. The mod folder is directly inside <D2R>\mods\, not nested deeper
    2. There's a modinfo.json file
-   3. The launcher knows where D2R is (Loader Directory, bottom-left)
+   3. The launcher knows where D2R is (use the "..." button in the
+      LOADER OPTIONS section header if you haven't picked it yet)
    The launcher watches the mods folder, so when something changes the
    "Refresh" button highlights - click it to rescan.
 
@@ -102,13 +106,6 @@ A: They only appear if the matching field exists in modinfo.json. Add any of:
    These can be URLs or file paths (relative or absolute).
 
 
-Q: Why don't the Discord/Docs/Website buttons grow on hover like the others?
-A: They're deliberately flat - they have a click-shrink animation (to confirm
-   the press) but no hover-grow, so they match the title-bar minimize/close
-   buttons and the Refresh button. The Nexus and Update Selected Mod buttons
-   still grow on hover because they're meant to read as more prominent calls
-   to action.
-
 
 Q: What does the small tooltip that appears when I hover a mod row show?
 A: Per-mod playtime tracking. After hovering for about two seconds you'll
@@ -124,6 +121,211 @@ A: A context menu appears with three options:
        Uninstall    - delete the mod from <D2R>\mods\ (with confirmation;
                       runs a save backup first so your characters aren't lost)
    See README.txt > RIGHT-CLICK MOD MENU for details on each.
+
+
+--------------------------------------------------------------------------------
+  PLUGIN MANAGER  (v1.3+, extended in v1.4)
+--------------------------------------------------------------------------------
+
+
+Q: What is the Plugin Manager?
+A: The Plugins button in the LOADER OPTIONS section opens a window listing
+   every plugin (.dll) and patch (.json) the launcher found for the
+   currently-selected mod. These sit either in your D2R install's global
+   d2rloader\ folders (available to every mod) or inside the mod's own
+   d2rloader\ folders (mod-local). The Plugin Manager lets you toggle each
+   one on or off for that mod.
+
+
+Q: What's the difference between a plugin and a patch?
+A: Plugins are .dll files that hook into the game's code. Patches are .json
+   files that describe memory modifications D2RLoader applies at runtime.
+   From the launcher's perspective they're the same thing - both live in
+   the d2rloader\ tree, both can be enabled/disabled, both can have friendly
+   names. The file extension shown in parentheses on each row tells you
+   which is which.
+
+
+Q: What's the difference between Global and Mod entries?
+A: Global entries live in <D2R>\d2rloader\plugins\ and <D2R>\d2rloader\patches\
+   and apply to every mod that doesn't override them. Mod entries live in
+   <D2R>\mods\<ModName>\d2rloader\plugins\ and ...\patches\ and only affect
+   that one mod. The Plugin Manager shows them under two section headers so
+   you can tell them apart at a glance. Toggling an entry off moves its file
+   into a sibling "Disabled\" folder, so nothing is deleted - you can flip
+   it back on later.
+
+
+Q: My plugins were in <D2R>\plugins\ and now they don't show up. What
+   happened?
+A: D2RLoader beta 1.0 moved plugin discovery to <D2R>\d2rloader\plugins\.
+   Move your .dll files there (and any .json patches to
+   <D2R>\d2rloader\patches\) and they'll reappear. Same for mod-local
+   plugins: <D2R>\mods\<Mod>\<Mod>.mpq\Plugins\ is no longer scanned by
+   either D2RLoader or the launcher; use
+   <D2R>\mods\<Mod>\d2rloader\plugins\ instead. This also fixes the
+   problem where mods shipping a compressed .mpq file (rather than an
+   exposed .mpq folder) couldn't have plugins at all.
+
+
+Q: What is plugin_config.json?
+A: An optional file a mod author can drop into their mod's root folder
+   listing exactly which plugins and patches the mod is designed to run
+   with. When a mod has one:
+     * The Plugin Manager shows the authored list as a read-only inventory -
+       no toggles, since the author has already made the choices.
+     * The launcher moves any of your globally-enabled plugins and patches
+       to their Disabled folders for the duration of that mod's session, so
+       nothing outside the author's curated list gets loaded.
+     * Missing entries from the list are auto-recovered from the global
+       or Disabled folders when possible (globals get copied so other mods
+       still have them; disabled entries get moved back).
+   The same recovery + globals sweep also runs the moment you press PLAY,
+   so there's no way to accidentally launch with stale globals enabled.
+
+
+Q: Can plugin_config.json list both .dll and .json files?
+A: Yes - put them all in the single "plugins" array:
+       { "plugins": ["someplugin.dll", "somefix.json"] }
+   The launcher routes each entry to plugins\ or patches\ based on its
+   extension.
+
+
+Q: The Plugin Manager says "<Author> has selected to disable plugins for
+   <Mod>". What does that mean?
+A: The mod ships a plugin_config.json with an empty plugin list — the
+   author has explicitly declared that this mod runs without any plugins
+   or patches. Your globals are temporarily moved to Disabled while that
+   mod is active. If you want to override this you can delete or edit the
+   mod's plugin_config.json — but that's the author telling you their mod
+   isn't built to play nicely with any plugin, so it may not run as
+   expected.
+
+
+Q: I toggled a global plugin on for one mod. Why did it disappear when I
+   selected a different mod?
+A: Global entries are shared across mods by default, but if the mod you
+   switched TO has a plugin_config.json that doesn't include that entry,
+   the launcher moves it to the global Disabled folder. It'll come back
+   automatically the next time you select a mod that expects it, or you
+   can move it out of Disabled manually.
+
+
+Q: A plugin I know I have installed isn't showing up in the Plugin Manager.
+   Where did it go?
+A: Three likely reasons:
+   1. It's in the old <D2R>\plugins\ location. Move it to
+      <D2R>\d2rloader\plugins\ (see the path question above).
+   2. The current mod has a plugin_config.json that doesn't list your
+      plugin - only configured entries appear in that mode.
+   3. The file is sitting in a "Disabled\" folder (either global or
+      mod-local). Move it out to the active folder and click Refresh in
+      the Plugin Manager.
+
+
+Q: Can I give my plugins and patches nicer display names?
+A: Yes - v1.3 added a launcher-wide plugin_manifest.json that maps
+   filenames to friendly display names. It covers both .dll plugins and
+   .json patches. There are two ways to edit it:
+     * Right-click any row in the Plugin Manager and pick "Rename..."
+       to enter a display name. Saves immediately.
+     * Open plugin_manifest.json in a text editor (it lives beside
+       Angiris.exe) and fill in names alongside the filename keys the
+       launcher already pre-populated for you.
+   Once set, the friendly name shows everywhere that file appears, in the
+   form "Friendly Name (filename.dll)" or "Friendly Name (filename.json)".
+
+
+Q: I edited plugin_manifest.json by hand. Why didn't my changes stick?
+A: The launcher rewrites plugin_manifest.json when the Plugin Manager
+   closes (to add newly-discovered files as blank entries). It preserves
+   any names you set, but if the file's JSON is malformed the launcher
+   falls back to defaults. Make sure your edits are valid JSON before
+   closing the Plugin Manager. Editing outside a launcher session (with
+   the launcher closed) is always safe.
+
+
+Q: I don't see (G) or (M) tags on my plugin rows any more. Where did they
+   go?
+A: v1.3 replaced the inline (G) / (M) tags with dedicated "Global plugins"
+   and "Mod plugins" section headers. Same information, less visual noise.
+
+
+--------------------------------------------------------------------------------
+  LOADER OPTIONS  (BASIC + DEVELOPER)
+--------------------------------------------------------------------------------
+
+
+Q: What are the Loader Options?
+A: The bottom-left panel labelled LOADER OPTIONS holds settings that get
+   written straight into D2RLoader.toml in your D2R install folder. These
+   are global settings - they apply to every mod, not just the selected
+   one. The panel is three buttons: Basic Options, Developer Options,
+   and Plugins.
+
+
+Q: What's in Basic Options?
+A: Six settings:
+     Show Sockets         - shows socket counts on ground items
+     Show Item Level      - shows item levels
+     Respec Skill/Stats   - enables in-game respec
+     Stash Tabs           - extra shared stash tabs (0-16 dropdown)
+     Material Limit       - stack limit for crafting materials (text box)
+     Show TCP/IP Button   - shows the TCP/IP option in the game menu
+
+
+Q: What's in Developer Options?
+A: Debug + logging settings most players will never need:
+     Enable Console          - D2RLoader's debug console
+     Assert Dialog Message   - shows assert dialogs instead of silently failing
+     Enable Logging          - master toggle for the log system
+   Plus seven log-detail toggles (JSON Resources, Widget Panel Creation,
+   Excel File Loaded, True and Open Type Fonts, UI Sprites Creation, Chat
+   Messages, Models Creation). These are greyed out and do nothing unless
+   Enable Logging is on.
+
+
+Q: Why is Material Limit a text box instead of a dropdown?
+A: The range is 0-255, which is too many entries for a comfortable menu.
+   Type a number and click away (or press Tab) - the value saves on
+   focus-loss. Out-of-range values snap to the nearest bound.
+
+
+Q: The Material Limit note says "Default = 99, Max = 255". What happens
+   above 99?
+A: D2RLoader accepts up to 255, but its own config documentation flags
+   values above 99 as producing undefined behaviour. Use them at your
+   own risk. The launcher lets you set anything in 0-255 and doesn't
+   second-guess you.
+
+
+Q: Why is there no Save button on the Options modals?
+A: Changes apply immediately - every toggle and value writes to
+   D2RLoader.toml the moment you change it. There's nothing to save
+   because D2RLoader only reads the toml when it launches, so there's
+   no live session state to preserve or roll back. Just close the
+   modal when you're done.
+
+
+Q: I changed a Loader Option but it doesn't seem to take effect. Why?
+A: D2RLoader reads the toml only when it starts, so the change applies
+   the NEXT time you press PLAY, not to a session that's already running.
+   Exit D2R and relaunch.
+
+
+Q: Will changing these wipe my other D2RLoader.toml settings?
+A: No. The launcher edits only the specific keys it surfaces and leaves
+   everything else - including your comments and any keys it doesn't
+   recognize - exactly as it found them.
+
+
+Q: The launcher keeps resetting default_mod and skip_title_screen. Why?
+A: Those two keys would bypass the launcher entirely - default_mod tells
+   D2RLoader to auto-launch a specific mod without showing the picker,
+   and skip_title_screen bypasses the D2R title screen. Angiris resets
+   both on every start so it stays the entry point for mod selection.
+   If you want D2RLoader to auto-launch without the launcher, run
+   D2RLoader.exe directly instead of through Angiris.
 
 
 --------------------------------------------------------------------------------
@@ -241,8 +443,7 @@ A: The launcher is installing the new version in place. The popup shows
        Downloading       - fetching the release zip from GitHub
        Updating          - extracting and copying new files
        Complete          - install done, ready to restart
-   When you see Complete, the Restart button enables (after a half-second
-   delay so accidental clicks don't fire). Click it to spawn the new
+   When you see Complete, the Restart button enables. Click it to spawn the new
    launcher and close the running one.
 
 
@@ -507,30 +708,6 @@ A: Yeah, it is. The "Black" preset is included for completeness but it
 
 
 --------------------------------------------------------------------------------
-  LOADER OPTIONS (D2RLoader.ini)
---------------------------------------------------------------------------------
-
-
-Q: What do "Stash Tabs" and "Dmg Display" do?
-A: They write directly to D2RLoader.ini in your D2R folder:
-       Stash Tabs   -> [Stash] extra_shared_tabs   (0-16 extra shared tabs)
-       Dmg Display  -> [Advanced.Logging] damage_indicator (0-2)
-   They're global - they apply to every mod, not just the selected one.
-
-
-Q: Will changing these wipe my other D2RLoader.ini settings?
-A: No. The launcher edits only those two specific lines and leaves everything
-   else - including your comments and any keys it doesn't recognize - exactly
-   as it found them.
-
-
-Q: The dropdowns show 0 even though my INI has other values.
-A: If D2RLoader.ini doesn't exist when the launcher starts, the values default
-   to 0. Set the Loader Directory correctly (so the launcher can find the INI),
-   then restart, or just pick a value from the dropdown to write it.
-
-
---------------------------------------------------------------------------------
   UPDATES (FOR MODS)
 --------------------------------------------------------------------------------
 
@@ -615,13 +792,16 @@ A: Not by dragging - the size is fixed for the current UI scale. To change
 
 
 Q: Where are my settings stored?
-A: Five places:
-   * launcher_config.json (next to the launcher exe) - global settings
-   * assets\seeds.json    (next to the launcher exe) - seed presets + recents
-   * assets\playtime.json (next to the launcher exe) - per-mod playtime
-   * <mod>\Launcher Files\launcher_mod_cfg.json      - per-mod flags + seed
-   * D2RLoader.ini        (in your D2R folder)       - stash tabs +
-                                                       damage display
+A: Six places:
+   * launcher_config.json  (next to the launcher exe) - global settings
+   * plugin_manifest.json  (next to the launcher exe) - plugin/patch names
+   * assets\seeds.json     (next to the launcher exe) - seed presets + recents
+   * assets\playtime.json  (next to the launcher exe) - per-mod playtime
+   * <mod>\Launcher Files\launcher_mod_cfg.json       - per-mod flags + seed
+   * D2RLoader.toml        (in your D2R folder)       - the loader settings
+                                                        surfaced by the Basic
+                                                        and Developer Options
+                                                        modals
    All are plain text and safe to inspect.
 
 
@@ -630,8 +810,10 @@ A: Quit the launcher and delete launcher_config.json. To also reset per-mod
    flags + seeds, delete the launcher_mod_cfg.json files inside each mod's
    Launcher Files folder. To clear the seed recents history, edit
    assets\seeds.json and empty the "recent" array. To clear all playtime
-   data, delete assets\playtime.json. (Deleting these won't touch
-   D2RLoader.ini.)
+   data, delete assets\playtime.json. To reset plugin/patch display names,
+   delete plugin_manifest.json (the launcher will re-create it with blank
+   entries next time you open the Plugin Manager). (Deleting any of these
+   won't touch D2RLoader.toml.)
 
 
 Q: The launcher won't start.

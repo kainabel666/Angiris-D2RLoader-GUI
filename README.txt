@@ -79,11 +79,40 @@ installed in your Diablo II: Resurrected folder.
   lights up to let you know there's new state to pick up
 
 
+--------------------------------------------------------------------------------
+  INSTALLATION
+--------------------------------------------------------------------------------
+
+1. Extract the launcher folder anywhere you like.
+
+2. The folder should contain:
+       Angiris.exe     (this launcher)
+       angiris.ico
+       assets\
+           fonts\        (optional - see TYPOGRAPHY below)
+           images\       (UI artwork: frame_main.png, bg_stone.png, etc.)
+           seeds.json    (optional - see SEED ARGUMENT below)
+           playtime.json (auto-created on first launch of a mod)
+       README.txt      (this file)
+       FAQ.txt
+       CHANGELOG.txt
+
+3. Make sure D2RLoader.exe (the loader/injector) is present in your
+   Diablo II: Resurrected install folder.
+
+4. Double-click the launcher.
+
+No installer, no registry entries, no DLLs to copy. The launcher writes a
+single config file (launcher_config.json) next to itself to remember settings,
+rewrites assets\seeds.json when you save typed seed values, and updates
+assets\playtime.json after each gameplay session.
+
+
 ================================================================================
                       Angiris Launcher  -  BUILD INSTRUCTIONS
 ================================================================================
 
-The launcher source is 33 .cpp files (split by concern - UI, layout, paint,
+The launcher source is 35 .cpp files (split by concern - UI, layout, paint,
 Windows plumbing, plugin manager, loader-options modals, etc.) plus their
 .h headers and one optional resource script.
 
@@ -169,7 +198,7 @@ If you'd rather invoke g++ yourself, the commands are:
     g++ -O2 -std=c++17 -mwindows -municode ^
         *.cpp angiris.res.o -o Angiris.exe ^
         -static ^
-        -lgdiplus -lcomctl32 -lshell32 -ladvapi32 ^
+        -lgdiplus -lcomctl32 -lshell32 -ladvapi32 -lversion -lbcrypt ^
         -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp
 
 Using *.cpp expands to every source file in the folder - simplest way to
@@ -192,6 +221,11 @@ Linked libraries:
     shlwapi     - path manipulation helpers
     ole32, uuid - OLE plumbing pulled in by some shell APIs
     winhttp     - update checks + launcher self-update download
+    version     - reading the file-version resource out of D2RLoader.exe
+                  (the version shown in the About modal)  [added v1.4.1]
+    bcrypt      - SHA-256 via Win32 CNG, used to verify the D2RLoader
+                  download against the checksum published on
+                  d2rloader.net  [added v1.4.1]
 
 
 ================================================================================
@@ -262,7 +296,8 @@ the Properties dialog.
                                       (semicolon-separated):
 
             gdiplus.lib;comctl32.lib;shell32.lib;advapi32.lib;
-            comdlg32.lib;shlwapi.lib;ole32.lib;uuid.lib;winhttp.lib
+            comdlg32.lib;shlwapi.lib;ole32.lib;uuid.lib;winhttp.lib;
+            version.lib;bcrypt.lib
 
 
 BUILD
@@ -340,35 +375,6 @@ preprocessor branches. A few things to keep in mind if you modify it:
 
 
 --------------------------------------------------------------------------------
-  INSTALLATION
---------------------------------------------------------------------------------
-
-1. Extract the launcher folder anywhere you like.
-
-2. The folder should contain:
-       Angiris.exe     (this launcher)
-       angiris.ico
-       assets\
-           fonts\        (optional - see TYPOGRAPHY below)
-           images\       (UI artwork: frame_main.png, bg_stone.png, etc.)
-           seeds.json    (optional - see SEED ARGUMENT below)
-           playtime.json (auto-created on first launch of a mod)
-       README.txt      (this file)
-       FAQ.txt
-       CHANGELOG.txt
-
-3. Make sure D2RLoader.exe (the loader/injector) is present in your
-   Diablo II: Resurrected install folder.
-
-4. Double-click the launcher.
-
-No installer, no registry entries, no DLLs to copy. The launcher writes a
-single config file (launcher_config.json) next to itself to remember settings,
-rewrites assets\seeds.json when you save typed seed values, and updates
-assets\playtime.json after each gameplay session.
-
-
---------------------------------------------------------------------------------
   TYPOGRAPHY (OPTIONAL)
 --------------------------------------------------------------------------------
 
@@ -427,7 +433,8 @@ LEFT RAIL
         Mods    - opens your <D2R>\mods\ folder
         Logs    - opens your <D2R>\logs\ folder
         Help    - opens this FAQ
-        About   - opens this README
+        About   - opens the About modal (version info, D2RLoader
+                  download, README / FAQ / Discord)
         Exit    - closes the launcher
     Loader Options (bottom):
         "..."               - button next to the LOADER OPTIONS header;
@@ -865,6 +872,114 @@ hover-grow.
 
 
 --------------------------------------------------------------------------------
+  ABOUT MODAL & D2RLOADER UPDATES
+--------------------------------------------------------------------------------
+
+The About button in the left rail opens a themed modal rather than
+launching README.txt in Notepad (which is what it did before v1.4.1).
+
+  HUB VIEW
+  --------
+
+      Angiris  v1.4.1
+      D2RLoader  v1.0.1 - beta        (or "Not detected")
+
+      [   Latest D2RLoader   ]        <- download + install button
+
+        (README)   (FAQ)   (Discord)  <- square icon buttons
+
+                [ Close ]
+
+  The D2RLoader version comes from the file-version resource inside
+  D2RLoader.exe. If the exe is missing, or a particular build doesn't
+  carry a version stamp, the line reads "Not detected" rather than
+  showing a blank or a guess.
+
+  README and FAQ open in a scrollable reader inside the modal - scroll
+  with the mouse wheel. From a document, Close returns you to the hub;
+  from the hub, Close dismisses the modal. Esc does the same at each
+  step. Discord opens the D2RLoader community server in your browser.
+
+
+  DOWNLOADING D2RLOADER
+  ---------------------
+
+  "Latest D2RLoader" fetches the current release from d2rloader.net and
+  installs it into your D2R folder. Progress shows in the modal:
+
+      Downloading -> Verifying -> Extracting -> Installing -> Updating config
+
+  Close the game first. If D2R or D2RLoader is running the launcher will
+  say so and offer to close them for you - their open file handles would
+  otherwise make the install fail partway through. Choosing "Yes" ends
+  both processes and continues automatically. The launcher checks again
+  right before writing any file, so starting the game mid-download
+  aborts cleanly instead of leaving a half-updated install.
+
+  A full log of every step lands in assets\d2rloader_install.log.
+
+
+  DOWNLOAD VERIFICATION
+  ---------------------
+
+  d2rloader.net publishes a SHA-256 checksum for each release. Before
+  extracting anything, the launcher hashes what it downloaded and
+  compares it against that published value.
+
+  * If the hashes DON'T match, the install stops and nothing is written
+    to your game folder. A mismatch means the file isn't what the
+    official release should be - a truncated download, a stale cached
+    copy, or tampering.
+  * If the checksum can't be read (site unreachable, page layout
+    changed), the install continues and notes it in the log. The
+    download itself still travels over HTTPS.
+
+  You can check manually too - the same page lists a PowerShell command
+  for it, and the launcher's log records both hashes side by side.
+
+
+  "D2RLOADER UPDATE AVAILABLE"
+  ----------------------------
+
+  At startup the launcher compares the D2RLoader you have installed
+  against the current release on d2rloader.net. If yours is older, gold
+  "D2RLoader Update Available" text appears above the LOADER OPTIONS
+  header. Click it to open the About modal and update.
+
+  The notice appears ONLY when both versions are known and the site's is
+  actually newer. If D2RLoader isn't installed, the check fails, or
+  you're already current, nothing is shown - it won't claim an update it
+  can't verify. Pre-release tags are ignored when comparing, so 1.0.1
+  and 1.0.1-beta count as the same version.
+
+  Details go to assets\d2rloader_check.log.
+
+
+  YOUR D2RLOADER.TOML IS NEVER OVERWRITTEN
+  ----------------------------------------
+
+  Installing a D2RLoader update preserves your existing D2RLoader.toml
+  and amends it instead:
+
+  * Settings you already have keep their values. If you set
+    show_ground_sockets = true and the new release ships false as the
+    default, you keep true.
+  * Keys and sections that are genuinely new get appended at the end
+    under a marker comment:
+
+        # ---- Added by Angiris Launcher (new D2RLoader keys) ----
+
+  * Nothing existing is edited, reordered, or removed.
+  * The original is copied to D2RLoader.toml.bak before anything is
+    written.
+
+  The appended block re-states its section headers, so you may see a
+  section name appear twice in the file. That's valid TOML - parsers
+  merge duplicate section headers - and it's the price of never
+  touching a line you already had.
+
+
+--------------------------------------------------------------------------------
   LOADER OPTIONS (D2RLoader.toml)
 --------------------------------------------------------------------------------
 
@@ -1096,6 +1211,36 @@ GLOBAL (next to the launcher exe):
                                     skipped is recorded here
 
 GLOBAL (next to the launcher exe, under assets\):
+    user_layout.json
+        Optional. Overrides parts of the UI layout. Every field is
+        optional - omit one and the launcher's default applies.
+
+        mod_row_height        - height in px of each row in the mod list
+        version_label_x       - x offset of the version label under the logo
+        version_label_y       - y offset of the version label
+        show_modding_expand   - true/false; false hides the expand arrow
+                                that opens the bottom modding area
+        scale_as_dropdown     - true/false (default false). true turns the
+                                toolbar's UI Scale control from a 3-state
+                                cycle toggle into a dropdown listing every
+                                preset available at your DPI, laid out with
+                                a "SCALE" header above the value box (like
+                                the On Launch column). One click to any
+                                scale instead of cycling.
+        nav_buttons           - per-button overrides keyed by id ("mods",
+                                "logs", "help", "about", "exit"), each
+                                accepting "visible" and "enabled" booleans
+
+        Example:
+            {
+                "scale_as_dropdown": true,
+                "show_modding_expand": true
+            }
+
+        This file is PRESERVED across launcher updates (see below), and a
+        startup migration adds any newly-introduced fields with their
+        defaults without disturbing what you've already set.
+
     seeds.json
         seeds   - array of {name, value} presets you maintain by hand
         recent  - array of up to 3 {name, value} entries; the launcher writes
@@ -1106,6 +1251,20 @@ GLOBAL (next to the launcher exe, under assets\):
         Keyed by mod folder name. Each entry records cumulative seconds played
         and the last-played date. Survives mod reinstalls (because the key is
         the folder name, not anything inside the mod).
+
+  FILES PRESERVED ACROSS LAUNCHER UPDATES
+  ---------------------------------------
+
+  Updating the launcher will NOT overwrite these, because they hold data
+  you created rather than defaults the launcher ships:
+
+      assets\user_layout.json
+      assets\seeds.json
+      assets\playtime.json
+
+  On a first-time install (where the file doesn't exist yet) the bundled
+  default is written normally. On an update, an existing file is left
+  exactly as it is.
 
 PER-MOD (inside each mod folder, under "Launcher Files\"):
     launcher_mod_cfg.json

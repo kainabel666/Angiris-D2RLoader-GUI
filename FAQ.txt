@@ -106,6 +106,13 @@ A: They only appear if the matching field exists in modinfo.json. Add any of:
    These can be URLs or file paths (relative or absolute).
 
 
+Q: Why don't the Discord/Docs/Website buttons grow on hover like the others?
+A: They're deliberately flat - they have a click-shrink animation (to confirm
+   the press) but no hover-grow, so they match the title-bar minimize/close
+   buttons and the Refresh button. The Nexus and Update Selected Mod buttons
+   still grow on hover because they're meant to read as more prominent calls
+   to action.
+
 
 Q: What does the small tooltip that appears when I hover a mod row show?
 A: Per-mod playtime tracking. After hovering for about two seconds you'll
@@ -249,6 +256,148 @@ Q: I don't see (G) or (M) tags on my plugin rows any more. Where did they
    go?
 A: v1.3 replaced the inline (G) / (M) tags with dedicated "Global plugins"
    and "Mod plugins" section headers. Same information, less visual noise.
+
+
+--------------------------------------------------------------------------------
+  ABOUT MODAL & D2RLOADER UPDATES
+--------------------------------------------------------------------------------
+
+
+Q: The About button used to open README.txt in Notepad. What happened?
+A: v1.4.1 replaced that with a proper About window. It shows your Angiris
+   version and your installed D2RLoader version, gives you a one-click
+   D2RLoader download, and opens README and FAQ inside the launcher
+   itself instead of handing them to an external editor.
+
+
+Q: How do I read the README or FAQ now?
+A: About -> the README or FAQ icon button. The document opens in a
+   scrollable panel inside the modal. Scroll with your mouse wheel.
+   Close takes you back to the About hub; Close again (or Esc) shuts
+   the window. The .txt files are still sitting next to the launcher
+   if you'd rather open them yourself.
+
+
+Q: Why does the About window say "D2RLoader — Not detected"?
+A: One of three things: D2RLoader.exe isn't in your D2R folder, your D2R
+   folder isn't set yet (use the "..." button in the LOADER OPTIONS
+   header), or that particular D2RLoader build doesn't carry a version
+   resource for the launcher to read. The launcher says "Not detected"
+   rather than guessing.
+
+
+Q: What does the "Latest D2RLoader" button do?
+A: Downloads the current D2RLoader release from d2rloader.net and
+   installs it into your D2R folder, then updates your D2RLoader.toml
+   with any new settings the release added. Your existing settings are
+   kept - see the config question below.
+
+
+Q: I clicked download and it told me to close D2R. Why?
+A: A running game or loader holds its files open, so an update would
+   fail partway and leave you with a half-updated install. The launcher
+   offers to close them for you - say Yes and it closes the game, waits
+   for the file locks to release, and starts the download automatically.
+   Any unsaved game progress is lost, since this is a hard close.
+
+
+Q: What if I launch the game while the download is running?
+A: The launcher checks again just before it writes anything. If the game
+   came up in the meantime it stops and tells you, without touching your
+   install. Close the game and click the button again.
+
+
+Q: What is the "Verifying" step?
+A: d2rloader.net publishes a SHA-256 checksum for each release. After
+   downloading, the launcher hashes the file and compares it against
+   that published value. If they don't match, the install stops and
+   nothing is written to your game folder - a mismatch means the file
+   isn't what the official release should be. If the checksum can't be
+   read at all (site down, page changed), the install continues and
+   notes it in assets\d2rloader_install.log.
+
+
+Q: Will updating D2RLoader wipe my D2RLoader.toml settings?
+A: No. Your toml is preserved and then amended. Values you already have
+   are never changed - if you set show_ground_sockets = true and the new
+   release defaults it to false, you keep true. Only genuinely new keys
+   and sections get appended, in a block marked
+
+       # ---- Added by Angiris Launcher (new D2RLoader keys) ----
+
+   Your original is backed up to D2RLoader.toml.bak first.
+
+
+Q: After an update my toml has the same section header twice. Is that
+   broken?
+A: No. The appended block re-states its section headers, so you may see
+   e.g. [d2rloader] appear a second time near the bottom. TOML parsers
+   merge duplicate section headers, so D2RLoader reads it correctly.
+   It's the tradeoff for a merge that never edits a line you already
+   had. You can tidy it by hand if you like.
+
+
+Q: What is the gold "D2RLoader Update Available" text?
+A: On startup the launcher compares your installed D2RLoader against the
+   current release listed on d2rloader.net. If yours is older, that
+   notice appears above the LOADER OPTIONS header. Click it to open the
+   About modal, where the download button will update you.
+
+
+Q: I know there's a newer D2RLoader but I don't see the notice.
+A: The notice only appears when the launcher can confirm BOTH versions
+   and the site's is genuinely newer. If D2RLoader isn't installed, the
+   version check couldn't reach the site, or your build has no version
+   stamp, nothing is shown rather than a claim it can't back up. Check
+   assets\d2rloader_check.log to see what it found. You can always open
+   About and download regardless of whether the notice is showing.
+
+
+Q: Does 1.0.1 vs 1.0.1-beta count as an update?
+A: No. Pre-release suffixes are stripped before comparing, so those two
+   are treated as the same version and no notice appears.
+
+
+--------------------------------------------------------------------------------
+  UI SCALE
+--------------------------------------------------------------------------------
+
+
+Q: Can I pick a UI scale directly instead of clicking through the toggle?
+A: Yes - add this to assets\user_layout.json:
+
+       { "scale_as_dropdown": true }
+
+   The Scale control becomes a dropdown listing every preset available
+   at your DPI, so it's one click to any of them. The control restacks
+   to put the "SCALE" label above the value box (matching the On Launch
+   column) and widens the box so three-digit values aren't cramped.
+   Leave the setting out, or set it false, to keep the cycle toggle.
+
+
+Q: I added scale_as_dropdown but nothing changed.
+A: Check the JSON is valid - a stray comma or missing brace makes the
+   launcher fall back to defaults for the whole file. The file lives at
+   assets\user_layout.json next to the launcher exe, and the setting
+   takes effect on the next launch.
+
+
+Q: Why did my window jump to the top of the screen when I maxed the UI
+   scale?
+A: At the highest scale for your DPI, a fully expanded window (with the
+   modding area open) can be taller than your screen. Rather than make
+   you drag the window up before you can use it, the launcher pins the
+   top edge to the top of your monitor's work area - but only when the
+   expanded window wouldn't otherwise fit. At any other scale, or if it
+   already fits, your window stays exactly where you left it.
+
+
+Q: My minimize/close buttons look plain and drawn rather than the normal
+   artwork.
+A: That's the fallback rendering, which means btn_minimize.png or
+   btn_close.png is missing from your assets folder or failed to load.
+   The buttons still work. Restoring those files from a fresh download
+   brings the artwork back.
 
 
 --------------------------------------------------------------------------------
@@ -443,7 +592,8 @@ A: The launcher is installing the new version in place. The popup shows
        Downloading       - fetching the release zip from GitHub
        Updating          - extracting and copying new files
        Complete          - install done, ready to restart
-   When you see Complete, the Restart button enables. Click it to spawn the new
+   When you see Complete, the Restart button enables (after a half-second
+   delay so accidental clicks don't fire). Click it to spawn the new
    launcher and close the running one.
 
 
@@ -803,6 +953,10 @@ A: Six places:
                                                         and Developer Options
                                                         modals
    All are plain text and safe to inspect.
+
+   Three of them - user_layout.json, seeds.json, and playtime.json - are
+   PRESERVED when the launcher updates itself, so your custom layout,
+   seed history, and playtime totals aren't reset by an update.
 
 
 Q: How do I reset all launcher settings?

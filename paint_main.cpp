@@ -25,6 +25,7 @@
 #include "launch_flags.h"     // FLAGS table (flag labels + locked status)
 #include "seeds.h"            // g_seedNames, g_seedValues, etc. (seed dropdown contents)
 #include "launcher_self_update.h"   // g_launcherUpdateAvailable (header badge)
+#include "d2rloader_update.h"        // g_d2rloaderUpdateAvailable, g_d2rloaderUpdateRect
 
 // Forward declarations for the file-static helpers that PaintBody
 // orchestrates. Sources follow the order PaintBody calls them in.
@@ -93,6 +94,28 @@ static void PaintLeftRail(Graphics& g, int /*W*/, int /*H*/) {
         // 9-slice with corner 30 preserves the frame's ornate corners
         // while allowing the mid strips to stretch to the taller size.
         DrawButton9Slice(g, lobg, bgX, bgY, bgW, bgH, 30);
+    }
+
+    // "D2RLoader Update Available" — gold, centered, just above the
+    // LOADER OPTIONS header. Only drawn when the background check found
+    // a newer version (g_d2rloaderUpdateAvailable). Clicking it (hit-
+    // tested in Angiris.cpp against g_d2rloaderUpdateRect) opens the
+    // About modal where the Download button lives.
+    if (g_d2rloaderUpdateAvailable
+        && g_d2rloaderUpdateRect.right > g_d2rloaderUpdateRect.left) {
+        StringFormat sfU;
+        sfU.SetAlignment(StringAlignmentCenter);
+        sfU.SetLineAlignment(StringAlignmentCenter);
+        sfU.SetFormatFlags(sfU.GetFormatFlags() | StringFormatFlagsNoWrap);
+        Gdiplus::Font* uf = g_fSubLbl ? g_fSubLbl : g_fBtn;
+        if (uf) {
+            const RECT& ur = g_d2rloaderUpdateRect;
+            g.DrawString(L"D2RLoader Update Available", -1, uf,
+                RectF((REAL)ur.left, (REAL)ur.top,
+                      (REAL)(ur.right - ur.left),
+                      (REAL)(ur.bottom - ur.top)),
+                &sfU, &gold);
+        }
     }
 
     // LOADER OPTIONS header. NoWrap + fixed width means GDI+ CLIPS text
@@ -832,6 +855,56 @@ static void PaintToolbarControl(Graphics& g, const RECT& r,
     }
 }
 
+// ── Programmatic fallback for the title-bar buttons ──────────────────
+// btn_minimize.png / btn_close.png are the normal path. If either asset
+// is missing or fails to decode, this draws the control instead so the
+// window buttons stay VISIBLE. They remain clickable either way (the
+// hit-test in Angiris.cpp is pure geometry), so without a fallback the
+// user gets an invisible-but-live button — a trap. Same defensive
+// pattern as PaintTopOrnament and the toggle sliders.
+//
+// Look: dark plate + bronze border + gold glyph, close enough to the
+// surrounding chrome that a missing asset reads as plain rather than
+// broken. Glyph colour follows Tok::Gold, so it tracks the user's
+// chosen colour preset like everything else.
+static void DrawTitleBarButtonFallback(Gdiplus::Graphics& g,
+                                       int x, int y, int w, int h,
+                                       bool isClose, bool hot) {
+    Gdiplus::SmoothingMode prevSmooth = g.GetSmoothingMode();
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+    // Plate. Cast to (INT) explicitly: GDI+ overloads these on INT vs
+    // REAL and the codebase's convention is to disambiguate at the call
+    // site rather than rely on promotion rules.
+    SolidBrush plate(Tok::BgPanel);
+    g.FillRectangle(&plate, (INT)(x + 1), (INT)(y + 1),
+                            (INT)(w - 2), (INT)(h - 2));
+    Pen border(hot ? Tok::GoldBright : Tok::Bronze, 1.0f);
+    g.DrawRectangle(&border, (INT)x, (INT)y, (INT)(w - 1), (INT)(h - 1));
+
+    // Glyph inset from the plate so the mark never crowds the border at
+    // any DPI. Based on the shorter side so non-square buttons behave.
+    REAL inset = (REAL)(w < h ? w : h) * 0.32f;
+    REAL gl = (REAL)x + inset;
+    REAL gr = (REAL)(x + w) - inset;
+    REAL gt = (REAL)y + inset;
+    REAL gb = (REAL)(y + h) - inset;
+    REAL cy = (REAL)y + (REAL)h * 0.5f;
+
+    Pen glyph(hot ? Tok::GoldBright : Tok::Gold, 2.0f);
+    glyph.SetStartCap(Gdiplus::LineCapRound);
+    glyph.SetEndCap(Gdiplus::LineCapRound);
+
+    if (isClose) {
+        g.DrawLine(&glyph, gl, gt, gr, gb);    // ╲
+        g.DrawLine(&glyph, gr, gt, gl, gb);    // ╱
+    } else {
+        g.DrawLine(&glyph, gl, cy, gr, cy);    // ─
+    }
+
+    g.SetSmoothingMode(prevSmooth);
+}
+
 void PaintBody(HDC hdc, int W, int H) {
     // W and H arrive in LOGICAL pixels (the caller converts via U() before
     // passing them in). The Graphics gets a ScaleTransform that maps every
@@ -1079,7 +1152,11 @@ void PaintBody(HDC hdc, int W, int H) {
     // face; Colour shows a small swatch chip. Per-control widths come
     // from TBL:: at file scope.
     {
-        // Scale cycler — current preset's label (e.g. "85%"). No chevron.
+        // Scale control — current preset's label (e.g. "85%"). In
+        // dropdown mode (scale_as_dropdown) a chevron is shown and the
+        // slider below is suppressed; in the default cycle mode there's
+        // no chevron and the 3-state slider renders beneath.
+        bool scaleIsDropdown = LayoutScaleAsDropdown(false);
         wchar_t scaleBuf[16] = L"--";
         for (auto& p : g_scalePresets) {
             if (p.mul == g_cfg.uiScale) {
@@ -1087,11 +1164,40 @@ void PaintBody(HDC hdc, int W, int H) {
                 break;
             }
         }
-        PaintToolbarControl(g, g_scaleDropdownRect,
-                            L"Scale", TBL::SCALE_LABEL_W,
-                            scaleBuf, nullptr, FontStyleRegular, nullptr,
-                            /*showChevron*/ false,
-                            /*cycleHint  */ false);
+        if (scaleIsDropdown) {
+            // Stacked layout (mirrors the On Launch column): "Scale"
+            // drawn as a plain header above, then a value-ONLY box below
+            // (labelW=0 so PaintToolbarControl gives the value the full
+            // rect width — that's the room "100" needs beside the
+            // chevron).
+            {
+                StringFormat sfHdr;
+                sfHdr.SetAlignment(StringAlignmentNear);
+                sfHdr.SetLineAlignment(StringAlignmentCenter);
+                sfHdr.SetFormatFlags(sfHdr.GetFormatFlags()
+                                     | StringFormatFlagsNoWrap);
+                SolidBrush hdrBr(Tok::TextParchment);
+                g.DrawString(L"Scale", -1, g_fBtn,
+                             RectF((REAL)g_scaleHeaderRect.left,
+                                   (REAL)g_scaleHeaderRect.top,
+                                   (REAL)(g_scaleHeaderRect.right
+                                          - g_scaleHeaderRect.left),
+                                   (REAL)(g_scaleHeaderRect.bottom
+                                          - g_scaleHeaderRect.top)),
+                             &sfHdr, &hdrBr);
+            }
+            PaintToolbarControl(g, g_scaleDropdownRect,
+                                L"", 0,
+                                scaleBuf, nullptr, FontStyleRegular, nullptr,
+                                /*showChevron*/ true,
+                                /*cycleHint  */ false);
+        } else {
+            PaintToolbarControl(g, g_scaleDropdownRect,
+                                L"Scale", TBL::SCALE_LABEL_W,
+                                scaleBuf, nullptr, FontStyleRegular, nullptr,
+                                /*showChevron*/ false,
+                                /*cycleHint  */ false);
+        }
 
         // 3-state toggle slider beneath the Scale row. The asset family
         // is btn_toggle1.png / btn_toggle2.png / btn_toggle3.png — one
@@ -1101,7 +1207,10 @@ void PaintBody(HDC hdc, int W, int H) {
         // missing (user is still authoring the variants), fall back to
         // a programmatic track + marker so the control is still
         // clickable even when its art is incomplete.
-        {
+        //
+        // Skipped entirely in dropdown mode — the value box's chevron
+        // is the affordance there and the slider would be redundant.
+        if (!scaleIsDropdown) {
             int state = ScaleToggleState();
             const wchar_t* assetName =
                 (state == 0) ? L"btn_toggle1.png" :
@@ -1267,7 +1376,6 @@ void PaintBody(HDC hdc, int W, int H) {
         };
         for (int i = 0; i < 2; ++i) {
             Gdiplus::Bitmap* bm = AssetImage(names[i]);
-            if (!bm) continue;
             int rightOfClose = W - TB_BTN_INSET_R;
             int closeX = rightOfClose - TB_BTN_W;
             int minX   = closeX - TB_BTN_GAP - TB_BTN_W;
@@ -1275,6 +1383,17 @@ void PaintBody(HDC hdc, int W, int H) {
             int y = TB_BTN_INSET_T;
 
             bool isPressed = (g_tbPressed == i);
+            bool isClose   = (i == 1);
+            // Draw the asset when we have it, else the programmatic
+            // fallback — either way something visible lands here, since
+            // the button stays clickable regardless.
+            auto drawOne = [&]() {
+                if (bm) DrawAssetAt(g, bm, x, y);
+                else    DrawTitleBarButtonFallback(g, x, y,
+                                                   TB_BTN_W, TB_BTN_H,
+                                                   isClose, isPressed);
+            };
+
             // Hover no longer scales — only the click-shrink applies. The
             // hover state itself is still tracked elsewhere (cursor, hit-
             // test) but produces no visible size change here.
@@ -1286,10 +1405,10 @@ void PaintBody(HDC hdc, int W, int H) {
                 g.TranslateTransform(cx + 1.0f, cy + 1.0f);
                 g.ScaleTransform(0.90f, 0.90f);
                 g.TranslateTransform(-cx, -cy);
-                DrawAssetAt(g, bm, x, y);
+                drawOne();
                 g.SetTransform(&prev);
             } else {
-                DrawAssetAt(g, bm, x, y);
+                drawOne();
             }
         }
     }

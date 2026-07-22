@@ -93,6 +93,8 @@
 #include "mod_list.h"
 #include "plugin_manager.h"
 #include "loader_options_modal.h"   // ShowBasicOptionsModal — Phase 3 preview trigger
+#include "about_modal.h"            // ShowAboutModal
+#include "d2rloader_update.h"       // KickoffD2RLoaderUpdateCheck, g_d2rloaderUpdateAvailable
 #include "plugin_config.h"     // v1.3: per-mod plugin manifest + globals-disable sweep
 #include "plugin_manifest.h"   // v1.3: launcher-wide DLL friendly name map
 #include "control_ids.h"
@@ -243,6 +245,7 @@ double QuerySystemDpiScale() {
 // the clickable area. Stays in Angiris.cpp because it's a paint
 // concern, not part of the self-update module's state.
 RECT g_versionLabelRect = {0, 0, 0, 0};
+RECT g_d2rloaderUpdateRect = {0, 0, 0, 0};
 
 // ModSettings struct and g_modSettings now live in launch_flags.h/cpp.
 
@@ -401,6 +404,7 @@ RECT        g_showSocketsRect   = {};         // v1.3: Show Sockets row rect + t
 // hit-tested in WM_LBUTTONDOWN. Layout() populates their rects.
 RECT        g_scaleDropdownRect = {};   // top-row Scale label+value (display only, not clickable)
 RECT        g_scaleSliderRect   = {};   // 3-state toggle slider below Scale — the click target
+RECT        g_scaleHeaderRect   = {};   // "SCALE" header above the value box (dropdown mode only)
 RECT        g_onLaunchHeaderRect= {};   // top tier — "ON LAUNCH" header label
 RECT        g_onLaunchRect      = {};   // middle tier — value-only textbox (Min/Close/Stay)
 RECT        g_onLaunchSliderRect= {};   // bottom tier — 3-state toggle slider
@@ -1134,16 +1138,66 @@ static void ApplyScaleChange(double newUserScale) {
 
     // 3. Resize the main window. Width is always S(WIN_W); height is
     //    S(WIN_H) or S(WIN_H + EXPAND_H) when the bottom panel is open.
-    //    Position is preserved (SWP_NOMOVE) — jumping the window to the
-    //    screen center on every scale change is more disruptive than
-    //    helpful. The user can move it if the new size pushes off-screen.
+    //    Position is normally preserved (SWP_NOMOVE) — jumping the window
+    //    to the screen center on every scale change is more disruptive
+    //    than helpful.
+    //
+    //    Exception: when scaling UP to the highest preset for the current
+    //    DPI AND the modding expand arrow is available (show_modding_expand
+    //    is not false in user_layout.json), the expanded window can be
+    //    tall enough that its bottom runs off the screen — forcing the
+    //    user to drag the title bar up before they can reach the expanded
+    //    modding area. In that case we pin the window's TOP to the top of
+    //    its monitor's work area so the maximum vertical space is
+    //    available downward. We only do this on the scale-up-to-max
+    //    transition, and only if the window would otherwise overflow, so
+    //    we don't fight the user's chosen position at smaller scales.
     if (g_hwMain) {
         int newW = S(LO::WIN_W);
         int newH = S(g_bottomExpanded
                      ? (LO::WIN_H + LO::EXPAND_H)
                      : LO::WIN_H);
-        SetWindowPos(g_hwMain, nullptr, 0, 0, newW, newH,
-                     SWP_NOMOVE | SWP_NOZORDER);
+
+        bool pinnedTop = false;
+
+        // Is the new scale the highest preset active at this DPI?
+        int pa, pb, pc;
+        ActiveScalePresets(pa, pb, pc);
+        double maxMul = g_scalePresets[pc].mul;
+        bool atMaxScale = (newUserScale == maxMul);
+
+        if (atMaxScale && LayoutShowModdingExpand(true)) {
+            // Work area (excludes the taskbar) of the monitor the window
+            // currently sits on.
+            HMONITOR mon = MonitorFromWindow(g_hwMain, MONITOR_DEFAULTTONEAREST);
+            MONITORINFO mi = { sizeof(mi) };
+            if (GetMonitorInfoW(mon, &mi)) {
+                RECT cur; GetWindowRect(g_hwMain, &cur);
+                // Height of the window at full expansion — the worst case
+                // the user might reach without moving the window again.
+                int expandedH = S(LO::WIN_H + LO::EXPAND_H);
+                int wouldOverflow =
+                    (cur.top + expandedH) > mi.rcWork.bottom;
+                if (wouldOverflow) {
+                    // Keep X where it is; pin Y to the work-area top.
+                    int newX = cur.left;
+                    int newY = mi.rcWork.top;
+                    // Clamp X back on-screen if the wider window would
+                    // spill off the right edge.
+                    if (newX + newW > mi.rcWork.right)
+                        newX = mi.rcWork.right - newW;
+                    if (newX < mi.rcWork.left) newX = mi.rcWork.left;
+                    SetWindowPos(g_hwMain, nullptr, newX, newY, newW, newH,
+                                 SWP_NOZORDER);
+                    pinnedTop = true;
+                }
+            }
+        }
+
+        if (!pinnedTop) {
+            SetWindowPos(g_hwMain, nullptr, 0, 0, newW, newH,
+                         SWP_NOMOVE | SWP_NOZORDER);
+        }
     }
 
     // WM_SIZE fires from SetWindowPos and runs Layout() with the new
@@ -1158,6 +1212,16 @@ static void ApplyScaleChange(double newUserScale) {
         RedrawWindow(g_hwMain, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_ALLCHILDREN);
     }
+}
+
+// Scale dropdown plumbing. popMenu's setter is a plain function pointer
+// (can't capture), so the list of multipliers the menu was built from
+// is stashed here for the setter to index into. Only used when the
+// toolbar Scale control is in dropdown mode (scale_as_dropdown).
+static std::vector<double> g_scaleMenuMuls;
+static void ScaleMenuSetter(int idx) {
+    if (idx < 0 || idx >= (int)g_scaleMenuMuls.size()) return;
+    ApplyScaleChange(g_scaleMenuMuls[idx]);
 }
 
 // Apply a Font dropdown selection: re-resolve the override family from
@@ -1785,6 +1849,18 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                 return TRUE;
             }
         }
+        // D2RLoader update text — hand cursor when a D2RLoader update is
+        // available and the pointer is over the gold text.
+        if (LOWORD(lp) == HTCLIENT && g_d2rloaderUpdateAvailable) {
+            POINT pt;
+            GetCursorPos(&pt);
+            ScreenToClient(hw, &pt);
+            POINT lpt = { U(pt.x), U(pt.y) };
+            if (PtInRect(&g_d2rloaderUpdateRect, lpt)) {
+                SetCursor(LoadCursor(nullptr, IDC_HAND));
+                return TRUE;
+            }
+        }
         return DefWindowProcW(hw, msg, wp, lp);
     }
 
@@ -2004,8 +2080,7 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         else if (id == IDC_NAV_ABOUT) {
-            wstring p = AppDir() + L"\\README.txt";
-            ShellExecute(hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            ShowAboutModal(hw);
             return 0;
         }
         else if (id == IDC_NAV_EXIT) {
@@ -2556,6 +2631,14 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     }
 
 
+    case MSG_D2RLOADER_UPDATE_AVAILABLE: {
+        // The check worker already set g_d2rloaderUpdateAvailable and
+        // parsed the latest version. Repaint so the gold "D2RLoader
+        // Update Available" text (above LOADER OPTIONS) lights up.
+        InvalidateRect(hw, nullptr, FALSE);
+        return 0;
+    }
+
     case MSG_LAUNCHER_UPDATE_AVAILABLE: {
         // Worker thread says a newer release was found on GitHub.
         // Verify it's actually newer than us — if so, set the glow
@@ -2721,6 +2804,17 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             if (PtInRect(&g_versionLabelRect, pt)) {
                 g_forceUpdatePrompt = true;
                 KickoffLauncherUpdateCheck();
+                return 0;
+            }
+        }
+
+        // "D2RLoader Update Available" gold text → open the About modal,
+        // where the Download button performs the update. Gated on the
+        // same flag as the paint + cursor so a stale rect can't be hit.
+        if (g_d2rloaderUpdateAvailable) {
+            POINT pt = { x, y };
+            if (PtInRect(&g_d2rloaderUpdateRect, pt)) {
+                ShowAboutModal(hw);
                 return 0;
             }
         }
@@ -2988,17 +3082,59 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 
         // ── Toolbar: Scale slider / Font / Colour ────────────────────────
         // Scale's top-row textbox is a read-only display; the click
-        // target is the slider beneath it (g_scaleSliderRect). Clicking
-        // advances through the three presets active at this DPI.
-        if (x >= g_scaleSliderRect.left && x < g_scaleSliderRect.right
-            && y >= g_scaleSliderRect.top && y < g_scaleSliderRect.bottom) {
-            int a, b, c;
-            ActiveScalePresets(a, b, c);
-            int order[3] = { a, b, c };
-            int cur = ScaleToggleState();
-            int next = (cur + 1) % 3;
-            ApplyScaleChange(g_scalePresets[order[next]].mul);
-            return 0;
+        // target is the slider beneath it (g_scaleSliderRect). Default
+        // behaviour cycles through the three presets active at this DPI.
+        //
+        // When user_layout.json sets scale_as_dropdown: true, the control
+        // is stacked instead (header above, wider value box below, no
+        // slider) and the click opens a themed dropdown listing all
+        // active presets so the user can pick one directly.
+        {
+            bool scaleDropdown = LayoutScaleAsDropdown(false);
+            // In dropdown mode the whole g_scaleDropdownRect IS the value
+            // box (there's no inline label tier to subtract — the "Scale"
+            // header sits on its own row above). In cycle mode the label
+            // shares the row, so peel it off to find the value box.
+            RECT scaleValueBox = scaleDropdown
+                ? g_scaleDropdownRect
+                : tbValueBox(g_scaleDropdownRect, TBL::SCALE_LABEL_W);
+            bool hitSlider =
+                (g_scaleSliderRect.right > g_scaleSliderRect.left
+                 && x >= g_scaleSliderRect.left && x < g_scaleSliderRect.right
+                 && y >= g_scaleSliderRect.top && y < g_scaleSliderRect.bottom);
+            bool hitValueBox =
+                (x >= scaleValueBox.left && x < scaleValueBox.right
+                 && y >= scaleValueBox.top && y < scaleValueBox.bottom);
+
+            if (scaleDropdown && hitValueBox) {
+                // Build the menu from the presets active at this DPI.
+                int a, b, c;
+                ActiveScalePresets(a, b, c);
+                int order[3] = { a, b, c };
+                std::vector<wstring> labels;
+                g_scaleMenuMuls.clear();
+                int curIdx = 0;
+                for (int i = 0; i < 3; ++i) {
+                    const ScalePreset& p = g_scalePresets[order[i]];
+                    labels.emplace_back(p.label);
+                    g_scaleMenuMuls.push_back(p.mul);
+                    if (p.mul == g_cfg.uiScale) curIdx = i;
+                }
+                popMenu(scaleValueBox, MenuKind::StringList,
+                        labels, {}, curIdx, S(TBL::SCALE_DD_VALUE_W),
+                        &ScaleMenuSetter);
+                return 0;
+            }
+
+            if (!scaleDropdown && hitSlider) {
+                int a, b, c;
+                ActiveScalePresets(a, b, c);
+                int order[3] = { a, b, c };
+                int cur = ScaleToggleState();
+                int next = (cur + 1) % 3;
+                ApplyScaleChange(g_scalePresets[order[next]].mul);
+                return 0;
+            }
         }
         // On Launch slider — clicking advances Minimize → Close →
         // Stay Open → Minimize. No window resize / font reload needed
@@ -3802,6 +3938,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // the row-height constant pick up overrides for the rest of init.
     // Must happen BEFORE anything that reads LO::ROW_H, nav button
     // visibility, or the modding-expand flag.
+    //
+    // MigrateLayoutFile() runs first: user_layout.json is on the
+    // updater's preserve list, so a version bump that adds new fields
+    // won't have them in an existing user's file. The migration inserts
+    // any missing fields (with defaults) so the load below sees a
+    // complete file. No-op on a fresh install (no file) or when the
+    // file is already current.
+    MigrateLayoutFile();
     LoadLayoutOverrides();
     LO::ROW_H = LayoutModRowHeight(LO::ROW_H);
 
@@ -3938,6 +4082,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     // target; the check runs in parallel with the rest of startup so
     // even a slow network can't delay the window from appearing.
     KickoffLauncherUpdateCheck();
+
+    // Same idea for D2RLoader: fetch d2rloader.net in the background,
+    // scrape the latest version, and compare it against the installed
+    // D2RLoader.exe. On finding a newer one, sets g_d2rloaderUpdateAvailable
+    // and posts MSG_D2RLOADER_UPDATE_AVAILABLE so the gold "D2RLoader
+    // Update Available" text lights up above the LOADER OPTIONS header.
+    KickoffD2RLoaderUpdateCheck(g_hwMain);
 
     // ── Startup notices ──────────────────────────────────────────────
     // If the D2R install couldn't be auto-detected, point the user at the

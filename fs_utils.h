@@ -57,8 +57,19 @@ bool CopyTreeExcept(const wstring& src, const wstring& dst,
 // failure is debuggable. If failCount is non-null, the running count
 // of failed file copies is written there. Returns true on full
 // success, false if any copy failed.
+//
+// `preserveExisting`, if non-null, is a null-terminated array of
+// forward-or-backslash relative paths (relative to the copy root,
+// e.g. L"assets\\seeds.json"). Any destination file matching one of
+// these paths (case-insensitive) that ALREADY EXISTS is left
+// untouched — the incoming version is skipped, logged as "PRESERVE".
+// A matching file that does NOT yet exist at the destination is
+// copied normally, so a fresh install still lays down the bundled
+// default. Used to protect user-owned data (layout, seeds, playtime)
+// across launcher updates.
 bool CopyTreeIntoLogged(const wstring& src, const wstring& dst,
-                        FILE* logF, int* failCount);
+                        FILE* logF, int* failCount,
+                        const wchar_t* const* preserveExisting = nullptr);
 
 // Invoke the Windows-bundled bsdtar to extract `zipPath` into
 // `destDir`. The hidden-window flag suppresses any console flash.

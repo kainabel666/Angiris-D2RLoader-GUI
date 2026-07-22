@@ -114,6 +114,77 @@ static std::optional<bool> ReadJsonBool(const wstring& json, const wchar_t* key)
     return JsonBool(json, key, false);
 }
 
+// ── Migration ────────────────────────────────────────────────────────
+//
+// user_layout.json is on the updater's preserve list (it holds the
+// user's own layout tweaks), so an update never overwrites it. That
+// means fields added in a new launcher version won't appear in an
+// existing user's file. This migration step amends the file in place:
+// for each field the current launcher knows about, if the file exists
+// and doesn't already contain that key, the default is inserted right
+// after the opening brace. Existing content — other keys, formatting,
+// comments — is left untouched. Absent file → no-op (a fresh install
+// lays down the bundled default, which already has every field).
+//
+// Called once at startup, before LoadLayoutOverrides(), so the parse
+// that follows sees the amended file.
+
+// Insert `"key": value,` immediately after the top-level opening brace,
+// preserving the rest of the text verbatim. Returns the amended string,
+// or the original unchanged if no opening brace was found.
+static wstring InsertTopLevelKey(const wstring& json,
+                                 const wchar_t* key, const wchar_t* value) {
+    size_t brace = json.find(L'{');
+    if (brace == wstring::npos) return json;
+    // Build "\n    \"key\": value," — a 4-space indent matching the
+    // typical hand-authored file. The trailing comma is safe because
+    // we insert BEFORE existing content (there's always at least the
+    // closing brace after us; if the object was empty the comma yields
+    // { "key": value, } which our tolerant reader still parses, but we
+    // guard the empty-object case below to avoid the dangling comma).
+    wstring insert = wstring(L"\n    \"") + key + L"\": " + value;
+
+    // Is the object non-empty (is there any non-brace, non-whitespace
+    // char between our brace and the matching close)? If empty, don't
+    // add a trailing comma.
+    bool objHasContent = false;
+    for (size_t i = brace + 1; i < json.size(); ++i) {
+        wchar_t c = json[i];
+        if (c == L'}') break;
+        if (c != L' ' && c != L'\t' && c != L'\r' && c != L'\n') {
+            objHasContent = true;
+            break;
+        }
+    }
+    if (objHasContent) insert += L",";
+
+    return json.substr(0, brace + 1) + insert + json.substr(brace + 1);
+}
+
+void MigrateLayoutFile() {
+    wstring path = AppDir() + L"\\assets\\user_layout.json";
+    wstring json = ReadTextFile(path);
+    if (json.empty()) return;    // absent/unreadable → nothing to migrate
+
+    // Fields added after the initial user_layout.json schema. Each is
+    // inserted with its launcher default only if the key is missing.
+    // Extend this list as new fields land in future versions.
+    struct Field { const wchar_t* key; const wchar_t* def; };
+    static const Field kFields[] = {
+        { L"scale_as_dropdown", L"false" },   // v1.4.1
+    };
+
+    bool changed = false;
+    for (const Field& f : kFields) {
+        if (!HasJsonKey(json, f.key)) {
+            json = InsertTopLevelKey(json, f.key, f.def);
+            changed = true;
+        }
+    }
+
+    if (changed) WriteTextFile(path, json);
+}
+
 // ── Loader ───────────────────────────────────────────────────────────
 
 void LoadLayoutOverrides() {
@@ -124,6 +195,7 @@ void LoadLayoutOverrides() {
     // Top-level scalar overrides
     g_layout.modRowHeight      = ReadJsonInt (json, L"mod_row_height");
     g_layout.showModdingExpand = ReadJsonBool(json, L"show_modding_expand");
+    g_layout.scaleAsDropdown   = ReadJsonBool(json, L"scale_as_dropdown");
 
     // Nested "version_label" object
     wstring verObj = ExtractNestedObject(json, L"version_label");
@@ -165,6 +237,7 @@ int  LayoutModRowHeight     (int  d) { return g_layout.modRowHeight     .value_o
 int  LayoutVersionLabelX    (int  d) { return g_layout.versionLabelX    .value_or(d); }
 int  LayoutVersionLabelY    (int  d) { return g_layout.versionLabelY    .value_or(d); }
 bool LayoutShowModdingExpand(bool d) { return g_layout.showModdingExpand.value_or(d); }
+bool LayoutScaleAsDropdown  (bool d) { return g_layout.scaleAsDropdown  .value_or(d); }
 
 bool LayoutNavButtonVisible(const wchar_t* id, bool d) {
     auto it = g_layout.navButtons.find(id);
@@ -576,6 +649,23 @@ void Layout(int W, int H) {
             sectionBot - BTN_H - ROW_GAP - BTN_H - ROW_GAP - BTN_H;
         int hdrY = basicTopUnlifted - LO_HDR_PAD - LO_HDR_H;
 
+        // "D2RLoader Update Available" clickable gold text, centered
+        // just ABOVE the LOADER OPTIONS header. Anchored here (rather
+        // than under the Exit nav button) because the nav buttons can
+        // be hidden or reordered via user_layout.json, whereas the
+        // Loader Options section top is stable. Only painted when the
+        // update check flagged one (g_d2rloaderUpdateAvailable); the
+        // rect is consumed by paint + hit-test in Angiris.cpp.
+        {
+            constexpr int UPD_H   = 22;
+            constexpr int UPD_GAP = 6;   // gap above the header
+            int uy = hdrY - UPD_GAP - UPD_H;
+            g_d2rloaderUpdateRect = { loaderX - LOADER_X_NUDGE, uy,
+                                      loaderX - LOADER_X_NUDGE + LEFT_RAIL_W
+                                        - COL_PAD * 2,
+                                      uy + UPD_H };
+        }
+
         // Button positions — everything below the header shifts up by
         // ROW_LIFT. All three buttons are the same nexus_update-style
         // artwork (254×54) with hover glow and click shrink.
@@ -730,20 +820,50 @@ void Layout(int W, int H) {
     }
 
     // ── Middle column: Scale ───────────────────────────────────────────
+    // Two layouts depending on scale_as_dropdown:
+    //
+    //   Cycle mode (default) — inline label + value on one row, with the
+    //     3-state toggle slider beneath:
+    //          SCALE [ 85% ]
+    //              (=o=)
+    //
+    //   Dropdown mode — stacked like the On Launch column: "SCALE" header
+    //     on its own row, a wider value box below it, no slider. The
+    //     extra width is what stops "100" from hiding behind the chevron
+    //     at heavier faces (Exocet Med), since the chevron eats 22px off
+    //     the value box's right edge.
+    //          SCALE
+    //          [ 100  v ]
     {
         int x = tbX0 + OL_LABEL_W + COL_GAP;
-        int textboxY = titleTierY;
-        int sliderY  = textboxY + TB_H + SLIDER_GAP;
 
-        g_scaleDropdownRect = { x, textboxY, x + TBL::SCALE_W,
-                                textboxY + TB_H };
-        // Slider nudged 10 px right of its centered-under-textbox
-        // position. The textbox itself stays put — only the slider
-        // shifts so it sits visually under the Scale's value tier
-        // (the "85%" text area) rather than under the column's center.
-        int scaleSliderX = x + (TBL::SCALE_W - SLIDER_W) / 2 + 10;
-        g_scaleSliderRect = { scaleSliderX, sliderY,
-                              scaleSliderX + SLIDER_W, sliderY + SLIDER_H };
+        if (LayoutScaleAsDropdown(false)) {
+            // Mirror the On Launch tier positions so the two columns'
+            // headers and boxes line up horizontally.
+            g_scaleHeaderRect = { x, olHeaderY,
+                                  x + TBL::SCALE_LABEL_W,
+                                  olHeaderY + HEADER_H };
+            g_scaleDropdownRect = { x, olTextboxY,
+                                    x + TBL::SCALE_DD_VALUE_W,
+                                    olTextboxY + TB_H };
+            // No slider in dropdown mode — zero it so a stale rect from
+            // a previous mode can't be hit-tested or painted.
+            g_scaleSliderRect = { 0, 0, 0, 0 };
+        } else {
+            int textboxY = titleTierY;
+            int sliderY  = textboxY + TB_H + SLIDER_GAP;
+
+            g_scaleHeaderRect = { 0, 0, 0, 0 };   // inline label, no header
+            g_scaleDropdownRect = { x, textboxY, x + TBL::SCALE_W,
+                                    textboxY + TB_H };
+            // Slider nudged 10 px right of its centered-under-textbox
+            // position. The textbox itself stays put — only the slider
+            // shifts so it sits visually under the Scale's value tier
+            // (the "85%" text area) rather than under the column's center.
+            int scaleSliderX = x + (TBL::SCALE_W - SLIDER_W) / 2 + 10;
+            g_scaleSliderRect = { scaleSliderX, sliderY,
+                                  scaleSliderX + SLIDER_W, sliderY + SLIDER_H };
+        }
     }
 
     // ── Right column: Font + Colour stacked ────────────────────────────

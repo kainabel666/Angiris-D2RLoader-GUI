@@ -37,6 +37,7 @@ enum class ButtonKind {
     ModLinkDocs,       // square 85×85 — uses btn_docs.png; falls back to 9-sliced btn_nexus_update + "D"
     ModLinkDiscord,    // square 85×85 — uses btn_discord.png; falls back to 9-sliced btn_nexus_update + "X"
     ModLinkWebsite,    // square 85×85 — uses btn_website.png; falls back to 9-sliced btn_nexus_update + "W"
+    ModLinkFaq,        // square 85×85 — uses btn_faq.png; falls back to 9-sliced btn_nexus_update + "?"
     Play,
     Ellipse,
     Arrow,

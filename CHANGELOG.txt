@@ -2,6 +2,173 @@ ANGIRIS LAUNCHER — CHANGELOG
 ═══════════════════════════════════════════════════════════════════════
 
 
+V1.4.1
+─────────────────────────────────────────────────────────────────────
+
+
+NEW: About modal (replaces the README-in-Notepad shortcut)
+
+  The About button in the left rail used to shell-open README.txt in
+  Notepad. It now opens a themed modal with two views:
+
+    Hub view      Angiris version, the detected D2RLoader version,
+                  a "Latest D2RLoader" download button, and a row of
+                  square icon buttons for README, FAQ, and Discord.
+
+    Reader view   README.txt and FAQ.txt render inside the modal in a
+                  scrollable panel instead of launching an external
+                  editor. Scroll with the mouse wheel. The Close button
+                  returns you to the hub from a document, and closes
+                  the modal from the hub (Esc does the same).
+
+  The D2RLoader version is read from the file-version resource stamped
+  into D2RLoader.exe. Builds without a version stamp, or a missing
+  install, show "Not detected" rather than a blank or a guess.
+
+
+NEW: One-click D2RLoader download + install
+
+  The "Latest D2RLoader" button in the About modal downloads the
+  current release from d2rloader.net and installs it into your D2R
+  folder. The whole thing runs in the background with a status line
+  in the modal:
+
+    Downloading -> Verifying -> Extracting -> Installing -> Updating config
+
+  Your D2RLoader.toml is never overwritten (see the config-merge entry
+  below), and D2R/D2RLoader must be closed first (see the guard entry).
+
+
+NEW: Download integrity check (SHA-256)
+
+  d2rloader.net publishes a SHA-256 for each release. The launcher now
+  fetches that hash and compares it against the bytes it actually
+  downloaded before extracting anything.
+
+  * Hash mismatch  -> the install ABORTS and nothing is written to your
+                      game folder. A mismatch means a truncated
+                      download, a stale CDN object, or tampering, and
+                      unpacking that over a working install is exactly
+                      what the checksum exists to prevent.
+  * Hash not found -> the install continues, with a warning in the log.
+                      The download already travels over HTTPS, so a
+                      broken page scrape shouldn't disable updating.
+
+  The full comparison is written to assets\d2rloader_install.log.
+
+
+NEW: D2RLoader "Update Available" notice
+
+  On startup the launcher checks d2rloader.net for the current release
+  and compares it against your installed D2RLoader.exe. When a newer
+  version exists, gold "D2RLoader Update Available" text appears above
+  the LOADER OPTIONS header. Clicking it opens the About modal, where
+  the download button does the update.
+
+  The notice only appears when BOTH versions are known AND the site's
+  is genuinely newer. Not installed, check failed, or already current
+  all show nothing — it never claims an update it can't verify.
+  Pre-release suffixes are ignored for the comparison, so 1.0.1 and
+  1.0.1-beta are treated as the same version.
+
+  Check details are logged to assets\d2rloader_check.log.
+
+
+NEW: Running-game guard with "Close Now"
+
+  Updating D2RLoader while D2R or D2RLoader is running would fail
+  partway (their open handles lock the files). The launcher now checks
+  before starting and offers to close the game for you:
+
+    "D2R or D2RLoader is currently running and must be closed before
+     updating. Close it now? (Any unsaved game progress will be lost.)"
+
+  Choosing Yes terminates both processes, waits for the handles to
+  release, verifies the field is clear, and continues straight into the
+  download. Choosing No cancels.
+
+  A second check runs immediately before any file is written, so
+  launching the game DURING the download aborts cleanly rather than
+  leaving a half-updated install.
+
+
+NEW: Additive-only D2RLoader.toml merge
+
+  When the launcher installs a D2RLoader update, your existing
+  D2RLoader.toml is preserved and then AMENDED — never replaced:
+
+  * Values you already have are never changed. If you set
+    show_ground_sockets = true and the new release defaults it to
+    false, you keep true.
+  * Keys and sections that are new in the release get appended in a
+    trailing block marked
+        # ---- Added by Angiris Launcher (new D2RLoader keys) ----
+  * Nothing is edited, reordered, or deleted.
+  * The original is backed up to D2RLoader.toml.bak first.
+
+  So a new loader feature gets its config keys without costing you any
+  of your tuning.
+
+
+NEW: Update-safe user files
+
+  Updating the launcher no longer overwrites files that hold YOUR data:
+
+      assets\user_layout.json
+      assets\seeds.json
+      assets\playtime.json
+
+  These are preserved if they already exist, so custom layouts, seed
+  history, and playtime totals survive an update. A first-time install
+  still lays down the bundled defaults.
+
+  Because user_layout.json is preserved, a migration step runs at
+  startup that adds any NEW layout fields (with their defaults) to an
+  existing file, leaving all your current settings and formatting
+  untouched. That's how scale_as_dropdown reaches users who already
+  have a layout file.
+
+
+NEW: UI Scale as a dropdown (scale_as_dropdown)
+
+  user_layout.json gains a "scale_as_dropdown" boolean. Set it true and
+  the toolbar's Scale control becomes a click-to-open dropdown listing
+  every preset available at your DPI, instead of a 3-state toggle you
+  cycle through. One click to any scale.
+
+      { "scale_as_dropdown": true }
+
+  In dropdown mode the control is stacked like the On Launch column —
+  "SCALE" header on top, value box below — and the box is wider than
+  the toggle-mode one so three-digit values clear the chevron at
+  heavier fonts. Default is false; the cycle toggle is unchanged.
+
+
+CHANGED: Window pins to the top of the screen at maximum scale
+
+  When you scale the UI to the highest preset for your DPI and the
+  modding expand arrow is available, the window now pins its top edge
+  to the top of the monitor's work area — but only if the fully
+  expanded window would otherwise run off the bottom of the screen.
+
+  This means you can open the expanded modding area at max scale
+  without first dragging the window up. At any other scale, with the
+  expand arrow hidden, or when the window already fits, the position is
+  left exactly where you put it.
+
+
+FIXED: Title-bar buttons vanished if their art was missing
+
+  The minimize and close buttons drew nothing when btn_minimize.png or
+  btn_close.png was missing or corrupt — but stayed clickable, since
+  the hit test is geometry-based. That left invisible live buttons in
+  the corner of the window.
+
+  Both now fall back to a drawn control (dark plate, bronze border,
+  gold glyph) that follows your chosen colour preset and keeps the
+  press feedback. Corrupt files take the same path as missing ones.
+
+
 V1.4
 ─────────────────────────────────────────────────────────────────────
 
@@ -115,6 +282,13 @@ CHANGED: launcher-enforced defaults on startup
   into that mod, skipping the launcher entirely. Angiris resets
   them each run so the launcher stays the entry point.
 
+
+FIXED: Loader Options frame extending past the section bottom
+
+  Frame-height calculation was reading a stale HWND rect on some
+  DPI configurations, causing the bg_loader_options frame to
+  stretch far below the Plugins button. Now derived directly from
+  the section's known geometry.
 
 
 FIXED: LOADER OPTIONS header clipping with wider font families

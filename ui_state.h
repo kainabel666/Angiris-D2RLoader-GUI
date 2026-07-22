@@ -74,10 +74,18 @@ extern RECT g_colorDropdownRect;
 extern RECT g_fontDropdownRect;
 extern RECT g_scaleDropdownRect;
 extern RECT g_scaleSliderRect;
+// Scale "SCALE" header, drawn above the value box in dropdown mode
+// (stacked ON LAUNCH-style layout). Zero-area in cycle mode. Set in
+// Layout(), read by paint_main.cpp.
+extern RECT g_scaleHeaderRect;
 extern RECT g_onLaunchHeaderRect;
 extern RECT g_onLaunchRect;
 extern RECT g_onLaunchSliderRect;
 extern RECT g_versionLabelRect;
+// Clickable "D2RLoader Update Available" gold text, positioned above the
+// LOADER OPTIONS header. Zero-area when no update is available. Set in
+// Layout(), consumed by paint + hit-test in Angiris.cpp.
+extern RECT g_d2rloaderUpdateRect;
 
 // ── Seed input virtual-focus state ───────────────────────────────────
 extern bool g_seedInputFocused;

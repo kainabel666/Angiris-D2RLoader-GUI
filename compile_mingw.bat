@@ -113,7 +113,7 @@ REM The g++ invocation below lists each source file directly.)
 REM Single source of truth for the compile list. Add or remove a file
 REM once here and it flows to the sanity check, the display, and the
 REM g++ invocation. (Previously three separate lists — always drifted.)
-set "SOURCES=Angiris.cpp core.cpp version.cpp config_editor.cpp http.cpp config.cpp update_cache.cpp playtime.cpp seeds.cpp mod_scan.cpp launch_flags.cpp mod_config.cpp tool_resolver.cpp fs_utils.cpp mod_updates.cpp save_backup.cpp zip_install.cpp launcher_self_update.cpp assets.cpp fonts.cpp layout.cpp scaling.cpp colors.cpp hover_tip.cpp mod_list.cpp plugin_manager.cpp plugin_config.cpp plugin_manifest.cpp loader_options_modal.cpp dialogs.cpp buttons.cpp paint_helpers.cpp paint_main.cpp"
+set "SOURCES=Angiris.cpp core.cpp version.cpp config_editor.cpp http.cpp config.cpp update_cache.cpp playtime.cpp seeds.cpp mod_scan.cpp launch_flags.cpp mod_config.cpp tool_resolver.cpp fs_utils.cpp mod_updates.cpp save_backup.cpp zip_install.cpp launcher_self_update.cpp assets.cpp fonts.cpp layout.cpp scaling.cpp colors.cpp hover_tip.cpp mod_list.cpp plugin_manager.cpp plugin_config.cpp plugin_manifest.cpp loader_options_modal.cpp about_modal.cpp d2rloader_update.cpp dialogs.cpp buttons.cpp paint_helpers.cpp paint_main.cpp"
 
 REM Sanity check: every listed source file must exist on disk.
 for %%S in (%SOURCES%) do (
@@ -168,7 +168,7 @@ for %%S in (%SOURCES%) do set SRC_ARGS=!SRC_ARGS! "%SRCDIR%%%S"
 "!GXX!" -O2 -std=c++17 -mwindows -municode !SRC_ARGS! ^
     "!RES_OBJ!" -o "%OUT%" ^
     -static ^
-    -lgdiplus -lcomctl32 -lshell32 -ladvapi32 -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp ^
+    -lbcrypt -lversion -lgdiplus -lcomctl32 -lshell32 -ladvapi32 -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp ^
     >> "%LOG%" 2>&1
 
 if %ERRORLEVEL% neq 0 (

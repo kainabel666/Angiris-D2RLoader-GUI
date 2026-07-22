@@ -1,4 +1,5 @@
 {
+    
   "_README": [
     "Angiris Launcher — user_layout.json",
     "",
@@ -65,5 +66,9 @@
     "help":    { "visible": true, "enabled": true },
     "about":   { "visible": true, "enabled": true },
     "exit":    { "visible": true, "enabled": true }
-  }
+  },
+  "-doc_scale_as_dropdown": [
+    "If true, the scale selector is a dropdown menu instead of a slider."
+  ],
+  "scale_as_dropdown": true
 }

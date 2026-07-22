@@ -47,6 +47,7 @@ static ButtonStateTransform StateTransformFor(ButtonKind k) {
     case ButtonKind::ModLinkDocs:    return { 1.00f, 0.93f, 1.0f, 1.0f };   // no hover-grow; click-shrink
     case ButtonKind::ModLinkDiscord: return { 1.00f, 0.93f, 1.0f, 1.0f };
     case ButtonKind::ModLinkWebsite: return { 1.00f, 0.93f, 1.0f, 1.0f };
+    case ButtonKind::ModLinkFaq:     return { 1.00f, 0.93f, 1.0f, 1.0f };
     case ButtonKind::Play:        return { 1.03f, 0.95f, 2.0f, 2.0f };
     case ButtonKind::Ellipse:     return { 1.08f, 0.90f, 1.0f, 1.0f };
     case ButtonKind::Arrow:       return { 1.06f, 0.92f, 0.0f, 2.0f };
@@ -66,6 +67,7 @@ static const wchar_t* AssetNameFor(ButtonKind k) {
     case ButtonKind::ModLinkDocs:    return L"btn_docs.png";
     case ButtonKind::ModLinkDiscord: return L"btn_discord.png";
     case ButtonKind::ModLinkWebsite: return L"btn_website.png";
+    case ButtonKind::ModLinkFaq:     return L"btn_faq.png";
     case ButtonKind::Play:        return L"btn_play.png";
     case ButtonKind::Ellipse:     return L"btn_ellipse.png";
     case ButtonKind::Arrow:       return L"btn_expand_arrow.png";
@@ -193,7 +195,8 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
         st.kind == ButtonKind::ModLink        ||
         st.kind == ButtonKind::ModLinkDocs    ||
         st.kind == ButtonKind::ModLinkDiscord ||
-        st.kind == ButtonKind::ModLinkWebsite)
+        st.kind == ButtonKind::ModLinkWebsite ||
+        st.kind == ButtonKind::ModLinkFaq)
         P = 0;
     int artX = d->rcItem.left + P;
     int artY = d->rcItem.top  + P;
@@ -225,7 +228,8 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
     bool modLinkFallback = false;
     if (!assetBM && (st.kind == ButtonKind::ModLinkDocs
               || st.kind == ButtonKind::ModLinkDiscord
-              || st.kind == ButtonKind::ModLinkWebsite)) {
+              || st.kind == ButtonKind::ModLinkWebsite
+              || st.kind == ButtonKind::ModLinkFaq)) {
         assetBM = AssetImage(L"btn_nexus_update.png");
         modLinkFallback = (assetBM != nullptr);
     }
@@ -391,7 +395,8 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
     // btn_nexus_update was used instead.
     bool isModLinkKind = (st.kind == ButtonKind::ModLinkDocs
                    || st.kind == ButtonKind::ModLinkDiscord
-                   || st.kind == ButtonKind::ModLinkWebsite);
+                   || st.kind == ButtonKind::ModLinkWebsite
+                   || st.kind == ButtonKind::ModLinkFaq);
     bool skipLabel = drewAsset && (st.kind == ButtonKind::Refresh
                             || st.kind == ButtonKind::Ellipse
                             || st.kind == ButtonKind::Arrow

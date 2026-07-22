@@ -67,6 +67,11 @@ struct LayoutOverrides {
     std::optional<int>  versionLabelX;
     std::optional<int>  versionLabelY;
     std::optional<bool> showModdingExpand;
+    // When true, the toolbar's UI Scale control is a click-to-open
+    // dropdown menu (listing all presets active at the current DPI)
+    // instead of the default 3-state cycle toggle. Lets users who
+    // prefer explicit selection over cycling pick a scale in one click.
+    std::optional<bool> scaleAsDropdown;
 
     // Per-button overrides keyed by id string ("mods", "logs", "help",
     // "about", "exit"). Missing key = no override for that button;
@@ -86,6 +91,13 @@ extern LayoutOverrides g_layout;
 // wWinMain BEFORE any paint or layout code runs.
 void LoadLayoutOverrides();
 
+// Amend an existing user_layout.json with any fields added in newer
+// launcher versions (the file is on the updater's preserve list, so
+// updates never rewrite it). Inserts each missing field with its
+// launcher default, preserving all existing content. Absent file →
+// no-op. Call once at startup BEFORE LoadLayoutOverrides().
+void MigrateLayoutFile();
+
 // ── Accessors (override OR default) ──────────────────────────────────
 //
 // Every accessor takes the launcher's hardcoded default and returns
@@ -96,6 +108,7 @@ int  LayoutModRowHeight       (int  defaultPx);
 int  LayoutVersionLabelX      (int  defaultX);
 int  LayoutVersionLabelY      (int  defaultY);
 bool LayoutShowModdingExpand  (bool defaultVisible);
+bool LayoutScaleAsDropdown    (bool defaultDropdown);
 
 // Per-button accessors. `id` is the lowercase button id ("mods",
 // "logs", "help", "about", "exit"). Defaults are `visible=true,
@@ -270,8 +283,15 @@ RECT BodySeedArrowRect(const BodyLayout& B);
 // value box sized for the abbreviated face label ("Cinz-Bol").
 namespace TBL {
     constexpr int SCALE_LABEL_W = 100;    // "SCALE"  (5 caps)
-    constexpr int SCALE_VALUE_W =  70;    // room for "127%" centered
+    constexpr int SCALE_VALUE_W =  70;    // room for "127%" centered (cycle mode)
     constexpr int SCALE_W       = SCALE_LABEL_W + 1 + SCALE_VALUE_W;   // 171
+
+    // Dropdown mode (scale_as_dropdown) uses a stacked layout like the
+    // On Launch column — "SCALE" header on top, value box below — so the
+    // value box gets its own full width rather than sharing a strip with
+    // the label. Wider than SCALE_VALUE_W so "100" + chevron fits at
+    // Exocet-Med without the last digit hiding behind the chevron.
+    constexpr int SCALE_DD_VALUE_W = 92;
 
     constexpr int FONT_LABEL_W  =  80;    // "FONT"   (4 caps)
     constexpr int FONT_VALUE_W  = 160;    // room for "Cin-Bol" + chevron

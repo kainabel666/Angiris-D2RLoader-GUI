@@ -669,8 +669,19 @@ static DWORD WINAPI LauncherUpdateInstallWorker(LPVOID lp) {
     // better UX than hanging on "Updating" forever.
     int failCount = 0;
     LOG(L"--- Begin copy ---");
+    // Files the update must NEVER overwrite — these hold user-owned data
+    // (custom layout, seed history, playtime totals). If they already
+    // exist at the install dir they're preserved; a first-time install
+    // still lays down the bundled defaults. Paths are relative to the
+    // install root, case-insensitive, '/' or '\' accepted.
+    static const wchar_t* const kPreserveFiles[] = {
+        L"assets\\user_layout.json",
+        L"assets\\seeds.json",
+        L"assets\\playtime.json",
+        nullptr,
+    };
     bool copyOk = CopyTreeIntoLogged(releaseRoot, installDir,
-                                     logF, &failCount);
+                                     logF, &failCount, kPreserveFiles);
     LOG(L"--- End copy ---  result=%ls  failures=%d",
         copyOk ? L"OK" : L"PARTIAL", failCount);
 

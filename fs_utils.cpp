@@ -140,8 +140,14 @@ bool CopyTreeExcept(const wstring& src, const wstring& dst,
     return ok;
 }
 
-bool CopyTreeIntoLogged(const wstring& src, const wstring& dst,
-                        FILE* logF, int* failCount) {
+// Internal recursion helper — carries `relBase`, the path of the
+// current directory relative to the copy root (empty at the top level,
+// "assets" one level down, etc.), so preserve-matching can compare
+// full relative paths like "assets\seeds.json".
+static bool CopyTreeIntoLoggedRec(const wstring& src, const wstring& dst,
+                                  const wstring& relBase,
+                                  FILE* logF, int* failCount,
+                                  const wchar_t* const* preserveExisting) {
     auto WLOG = [&](const wchar_t* fmt, ...) {
         if (!logF) return;
         va_list ap;
@@ -150,6 +156,30 @@ bool CopyTreeIntoLogged(const wstring& src, const wstring& dst,
         va_end(ap);
         fwprintf(logF, L"\n");
         fflush(logF);
+    };
+
+    // Case-insensitive comparison of two relative paths, treating '/'
+    // and '\' as equivalent separators.
+    auto relPathEq = [](const wstring& a, const wchar_t* b) -> bool {
+        size_t i = 0;
+        for (;; ++i) {
+            wchar_t ca = (i < a.size()) ? a[i] : L'\0';
+            wchar_t cb = b[i];
+            if (ca == L'/')  ca = L'\\';
+            if (cb == L'/')  cb = L'\\';
+            if (ca >= L'A' && ca <= L'Z') ca = (wchar_t)(ca - L'A' + L'a');
+            if (cb >= L'A' && cb <= L'Z') cb = (wchar_t)(cb - L'A' + L'a');
+            if (ca != cb) return false;
+            if (ca == L'\0') return true;
+        }
+    };
+
+    auto shouldPreserve = [&](const wstring& rel) -> bool {
+        if (!preserveExisting) return false;
+        for (int i = 0; preserveExisting[i] != nullptr; ++i) {
+            if (relPathEq(rel, preserveExisting[i])) return true;
+        }
+        return false;
     };
 
     WIN32_FIND_DATAW fd;
@@ -162,10 +192,21 @@ bool CopyTreeIntoLogged(const wstring& src, const wstring& dst,
         if (wcscmp(fd.cFileName, L"..") == 0) continue;
         wstring s = src + L"\\" + fd.cFileName;
         wstring d = dst + L"\\" + fd.cFileName;
+        wstring rel = relBase.empty() ? wstring(fd.cFileName)
+                                      : relBase + L"\\" + fd.cFileName;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             if (!ZI_DirExists(d)) CreateDirectoryW(d.c_str(), nullptr);
-            if (!CopyTreeIntoLogged(s, d, logF, failCount)) ok = false;
+            if (!CopyTreeIntoLoggedRec(s, d, rel, logF, failCount,
+                                       preserveExisting)) ok = false;
         } else {
+            // Preserve user-owned files that already exist at the
+            // destination — skip the incoming (bundled default) copy so
+            // an update never clobbers the user's data. A first-time
+            // install (file absent) still lays down the default.
+            if (shouldPreserve(rel) && ZI_FileExists(d)) {
+                WLOG(L"  PRESERVE  : %ls", d.c_str());
+                continue;
+            }
             if (CopyFileW(s.c_str(), d.c_str(), FALSE)) {
                 WLOG(L"  COPY OK   : %ls", d.c_str());
             } else {
@@ -178,4 +219,11 @@ bool CopyTreeIntoLogged(const wstring& src, const wstring& dst,
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     return ok;
+}
+
+bool CopyTreeIntoLogged(const wstring& src, const wstring& dst,
+                        FILE* logF, int* failCount,
+                        const wchar_t* const* preserveExisting) {
+    return CopyTreeIntoLoggedRec(src, dst, L"", logF, failCount,
+                                 preserveExisting);
 }

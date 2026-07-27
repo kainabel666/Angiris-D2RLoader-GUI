@@ -70,5 +70,12 @@
   "-doc_scale_as_dropdown": [
     "If true, the scale selector is a dropdown menu instead of a slider."
   ],
-  "scale_as_dropdown": true
+  "scale_as_dropdown": true,
+  
+  "doc_ reader_use_app_font": [
+    "If true, the reader uses the launcher font instead of the Georgia Font.",
+    "Exocet is almost impossible to read at length - would recommend leave false and",
+    "letting Georgia do its thing"
+  ],
+  "reader_use_app_font": false
 }

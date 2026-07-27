@@ -106,6 +106,7 @@ static HWND g_abEdit     = nullptr;
 // mouse wheel scrolls the text even when the EDIT (not the parent
 // modal) is under the cursor. Restored implicitly on destroy.
 static WNDPROC g_abEditPrevProc = nullptr;
+static HFONT   g_abReaderFont   = nullptr;   // Georgia HFONT for the reader
 
 // Cached D2RLoader version string, resolved once per open.
 static wstring g_abLoaderVer;
@@ -513,6 +514,7 @@ static LRESULT CALLBACK AboutProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
         g_abDiscord  = nullptr;
         g_abEdit     = nullptr;
         g_abEditPrevProc = nullptr;
+        if (g_abReaderFont) { DeleteObject(g_abReaderFont); g_abReaderFont = nullptr; }
         g_abView     = AboutView::Hub;
         return 0;
     }
@@ -627,11 +629,11 @@ void ShowAboutModal(HWND parent) {
             edX, edY, edW, edH,
             g_abHwnd, nullptr, g_hInst, nullptr);
         if (g_abEdit) {
-            // EDIT wants an HFONT; the GDI+ fonts aren't HFONTs, so use
-            // a stock GUI font for the reader body. Readable and always
-            // present.
-            HFONT hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-            SendMessageW(g_abEdit, WM_SETFONT, (WPARAM)hf, TRUE);
+            // Themed reading font (Georgia) rather than the stock GUI font.
+            // The user's display font is intentionally not used — see
+            // MakeReaderFont. Freed on WM_DESTROY.
+            g_abReaderFont = MakeReaderFont(11);
+            SendMessageW(g_abEdit, WM_SETFONT, (WPARAM)g_abReaderFont, TRUE);
             // Subclass so the wheel scrolls the EDIT when it's under the
             // cursor (the child, not the parent, gets those messages).
             g_abEditPrevProc = (WNDPROC)SetWindowLongPtrW(

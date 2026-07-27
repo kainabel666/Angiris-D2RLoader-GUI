@@ -174,3 +174,29 @@ Gdiplus::FontFamily* MakeFamily(const wchar_t* primary) {
     }
     return f;
 }
+
+// ── Reader body font (Georgia HFONT) ─────────────────────────────────────
+// The README/FAQ readers are Win32 EDIT controls, which take a GDI HFONT,
+// not a GDI+ Font. Georgia is the launcher's long-form reading face (the
+// same family used for dense text elsewhere), so the readers get a themed
+// but still-legible font instead of the stock system one. The user's
+// DISPLAY font (Exocet/Cinzel/etc.) is deliberately NOT used here — those
+// are decorative faces that read poorly in paragraphs of documentation.
+//
+// Caller owns the returned HFONT and must DeleteObject it (the modals do
+// so on WM_DESTROY). Point size is scaled by the current DPI so the reader
+// matches the rest of the UI. Falls back to DEFAULT_GUI_FONT if creation
+// fails for any reason.
+HFONT MakeReaderFont(int pointSize) {
+    // EDIT/GDI want a height in logical units; negative = character height
+    // (excludes internal leading), which is the usual choice for point sizes.
+    int px = (int)(pointSize * 96.0 / 72.0 * g_dpiScale + 0.5);
+    HFONT hf = CreateFontW(
+        -px, 0, 0, 0,
+        FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, FF_ROMAN | VARIABLE_PITCH,
+        L"Georgia");
+    if (!hf) hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    return hf;
+}

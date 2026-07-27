@@ -120,3 +120,8 @@ void UnloadFonts();
 // wasn't loaded), return the Georgia fallback so callers never see
 // a null. NEVER returns nullptr unless even Georgia is missing.
 Gdiplus::FontFamily* MakeFamily(const wchar_t* primary);
+
+// Create a Georgia HFONT for the README/FAQ reader EDIT controls. Caller
+// owns it and must DeleteObject it. See fonts.cpp for why the reader uses
+// Georgia rather than the user's display font.
+HFONT MakeReaderFont(int pointSize);

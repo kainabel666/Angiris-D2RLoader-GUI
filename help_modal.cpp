@@ -52,6 +52,7 @@ static HWND    g_hmEdit        = nullptr;
 static HWND    g_hmDiscord     = nullptr;
 static HWND    g_hmClose       = nullptr;
 static WNDPROC g_hmEditPrev    = nullptr;
+static HFONT   g_hmReaderFont  = nullptr;   // Georgia HFONT for the FAQ reader
 static bool    g_hmClassReg    = false;
 
 // Wheel-scroll subclass — a child EDIT under the cursor gets WM_MOUSEWHEEL
@@ -234,6 +235,7 @@ static LRESULT CALLBACK HelpModalProc(HWND hw, UINT msg,
         g_hmEdit    = nullptr;
         g_hmDiscord = nullptr;
         g_hmClose   = nullptr;
+        if (g_hmReaderFont) { DeleteObject(g_hmReaderFont); g_hmReaderFont = nullptr; }
         return 0;
     }
     return DefWindowProcW(hw, msg, wp, lp);
@@ -288,8 +290,10 @@ void ShowHelpModal(HWND parent) {
         edX, edY, edW, edH,
         g_hmHwnd, nullptr, g_hInst, nullptr);
     if (g_hmEdit) {
-        HFONT hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-        SendMessageW(g_hmEdit, WM_SETFONT, (WPARAM)hf, TRUE);
+        // Themed reading font (Georgia), not the stock GUI font or the
+        // user's display font — see MakeReaderFont. Freed on WM_DESTROY.
+        g_hmReaderFont = MakeReaderFont(11);
+        SendMessageW(g_hmEdit, WM_SETFONT, (WPARAM)g_hmReaderFont, TRUE);
         g_hmEditPrev = (WNDPROC)SetWindowLongPtrW(
             g_hmEdit, GWLP_WNDPROC, (LONG_PTR)HelpEditProc);
         LoadFaqInto(g_hmEdit);

@@ -166,6 +166,4 @@ extern HWND g_hwUpdateMod;        // bottom-right "Update Selected"
 
 // Bottom expansion panel
 extern HWND g_hwExpandToggle;     // arrow button
-extern HWND g_hwBottomTools[6];   // 6 tool launchers
-extern HWND g_hwBottomRefs[3];    // 3 references
-extern HWND g_hwBottomDls[3];     // 3 download links
+extern HWND g_hwExpandSections[4];  // References / Tools / Downloads / Tutorials

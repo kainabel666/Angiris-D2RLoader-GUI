@@ -40,7 +40,7 @@ void LoadCfg() {
     // narrow-to-active-DPI-subset snap after computing g_dpiScale.
     g_cfg.uiScale = JsonDouble(j, L"ui_scale", 1.00);
     {
-        constexpr double presets[] = { 0.75, 0.85, 1.00, 1.15, 1.275 };
+        constexpr double presets[] = { 0.50, 0.65, 0.75, 0.85, 1.00, 1.15, 1.275 };
         double bestDist = 1e9;
         double best = 1.00;
         for (double p : presets) {

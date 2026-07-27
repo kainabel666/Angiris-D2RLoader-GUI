@@ -180,7 +180,7 @@ BOTTOM PANEL (hidden by default - click the arrow under the center column)
     REFERENCES        - Eez's File Guides, Phrozen Keep, Amazon Basin
     TOOLS AND PROGRAMS - Edit TXT / Sprite / JSON / Particles / Textures /
                          Models (launches your local tools)
-    DOWNLOADS         - AFJ Pro Text Editor, Eez's Sprite Editor,
+    DOWNLOADS         - Text Editor, Eez's Sprite Editor,
                          Visual Basic Code
 
 Each section has its own background sampled from a different region of
@@ -595,7 +595,7 @@ you change them.
 
 The TOOLS AND PROGRAMS section launches your locally-installed modding tools:
 
-    Edit TXT Files    -> your TXT/Excel editor (e.g. AFJ Sheet Editor Pro)
+    Edit TXT Files    -> your TXT/Excel editor (e.g. Text Editor )
     Edit Sprite Files -> your sprite editor
     Edit JSON Files   -> your JSON/text editor (e.g. VS Code)
     Edit Models       -> your model editor

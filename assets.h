@@ -38,6 +38,12 @@ wstring AssetDir();
 // every paint.
 Gdiplus::Bitmap* AssetImage(const wchar_t* name);
 
+// Like AssetImage, but returns a 32bppPARGB clone cached for fast
+// blitting (no per-draw pixel-format conversion). Use for large textures
+// drawn every paint — stone, frames, panels. Falls back to the original
+// bitmap if cloning fails. Same lifetime as the main asset cache.
+Gdiplus::Bitmap* AssetImageFast(const wchar_t* name);
+
 // Free every cached bitmap. Called once at exit and once before an
 // in-place self-update install begins (the install needs to overwrite
 // the .png files on disk, which would otherwise be locked by their

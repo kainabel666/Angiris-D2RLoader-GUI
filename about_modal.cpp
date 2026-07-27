@@ -71,13 +71,16 @@ constexpr int AB_READER_TOP     = 56;   // below the title band
 // URLs.
 static const wchar_t* kUrlDiscord  = L"https://discord.gg/eEHT2kcBMf";
 
-// Control IDs.
+// Control IDs. Start at 100 to stay clear of IDOK (1) and IDCANCEL (2):
+// IsDialogMessage synthesizes a WM_COMMAND with IDCANCEL when Esc is
+// pressed, so any control sharing id 2 would be "clicked" by Esc. That
+// bug previously fired the Download button (which had been id 2) on Esc.
 enum {
-    ID_CLOSE     = 1,
-    ID_DOWNLOAD  = 2,
-    ID_README    = 3,
-    ID_FAQ       = 4,
-    ID_DISCORD   = 5,
+    ID_CLOSE     = 100,
+    ID_DOWNLOAD  = 101,
+    ID_README    = 102,
+    ID_FAQ       = 103,
+    ID_DISCORD   = 104,
 };
 
 // ─────────────────────────────────────────────────────────────────────
@@ -402,6 +405,14 @@ static LRESULT CALLBACK AboutProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND: {
         WORD id   = LOWORD(wp);
         WORD code = HIWORD(wp);
+        // IsDialogMessage turns Esc into a WM_COMMAND/IDCANCEL. Treat it
+        // exactly like Esc in WM_KEYDOWN: back out of the reader, else
+        // close. (Belt-and-suspenders alongside the WM_KEYDOWN handler.)
+        if (id == IDCANCEL) {
+            if (g_abView == AboutView::Reader) ExitReader();
+            else                               DestroyWindow(hw);
+            return 0;
+        }
         if (code == BN_CLICKED) {
             switch (id) {
                 case ID_CLOSE:

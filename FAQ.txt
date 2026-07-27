@@ -271,11 +271,18 @@ A: v1.4.1 replaced that with a proper About window. It shows your Angiris
 
 
 Q: How do I read the README or FAQ now?
-A: About -> the README or FAQ icon button. The document opens in a
-   scrollable panel inside the modal. Scroll with your mouse wheel.
-   Close takes you back to the About hub; Close again (or Esc) shuts
-   the window. The .txt files are still sitting next to the launcher
-   if you'd rather open them yourself.
+A: For the FAQ, just click Help in the left rail - it opens the FAQ in a
+   scrollable reader inside the launcher, with a Discord link at the
+   bottom. For the README, use About -> the README icon button. Both
+   scroll with the mouse wheel; Close or Esc dismisses them. The .txt
+   files are still sitting next to the launcher if you'd rather open them
+   yourself.
+
+
+Q: The Help button used to open FAQ.txt in Notepad. What happened?
+A: As of v1.5 it opens the FAQ in a reader inside the launcher instead,
+   styled to match the rest of the UI. Below the text is a "Need More
+   Help?" prompt with a Discord button for the community server.
 
 
 Q: Why does the About window say "D2RLoader — Not detected"?
@@ -380,6 +387,45 @@ A: Check the JSON is valid - a stray comma or missing brace makes the
    launcher fall back to defaults for the whole file. The file lives at
    assets\user_layout.json next to the launcher exe, and the setting
    takes effect on the next launch.
+
+
+Q: The launcher opened so large I can't reach the Scale control to fix
+   it. What do I do?
+A: Update to v1.5 and just launch it - it corrects itself. Earlier
+   versions offered scale options that didn't fit smaller screens (on
+   1080p, the 127% option made the window 273px taller than the desktop),
+   and since the Scale control sits near the bottom of the window,
+   choosing one put the control out of reach permanently. v1.5 checks
+   every scale against your actual monitor at startup and steps it down
+   to one that fits.
+
+   If you're stuck on an older build, delete launcher_config.json (next
+   to the launcher exe) to reset the scale. You'll lose your saved D2R
+   path and preferences, but the window will be usable again.
+
+
+Q: Why do I get different scale percentages than someone else on the same
+   Windows scaling?
+A: Because resolution matters as much as Windows scaling. A 1080p and a
+   4K screen both set to 150% report the same scaling to Windows, but the
+   4K screen has far more room. The options you get:
+
+                     Windows 100%     Windows 125%     Windows 150%
+       1080p          75/85/100        50/65/75         50/65/75
+       1440p          100/115/127      75/85/100        65/75/85
+       4K             100/115/127      85/100/115       75/85/100
+
+   Your Windows scaling picks the set; your resolution shifts it down if
+   that set wouldn't fit on screen.
+
+
+Q: My scale changed by itself after I updated / moved the window to
+   another monitor.
+A: The launcher won't apply a scale whose window doesn't fit the monitor
+   it's on - it drops to the largest one that does. Moving from a large
+   monitor to a smaller one will reduce it. Note that it doesn't go back
+   up automatically when you return to the larger monitor; set it again
+   from the Scale control.
 
 
 Q: Why did my window jump to the top of the screen when I maxed the UI
@@ -912,16 +958,26 @@ A: Either the tool isn't in your tools folder, or it has a different filename
 
 
 Q: Where do I download these tools?
-A: Use the DOWNLOADS column in the bottom panel:
-       AFJ Pro Text Editor
-       Eez's Sprite Editor
+A: Open the DOWNLOADS section in the bottom panel:
+       Text Editor
+       Sprite Editor
        Visual Basic Code
-   The links open in your browser.
+   Each opens a download page in your browser.
 
 
-Q: What do the REFERENCES buttons do?
-A: They open community modding resources in your browser (Eez's File Guides,
-   The Phrozen Keep, Amazon Basin).
+Q: What do the REFERENCES and TUTORIALS sections do?
+A: REFERENCES opens community modding resources in your browser (File
+   Guides, The Phrozen Keep, Amazon Basin, Paul Siramy's site). TUTORIALS
+   opens step-by-step guides - level creation, larger stash, runewords,
+   items and sets, superuniques, and a beginner's guide - with more added
+   over time.
+
+
+Q: How does the bottom panel work now?
+A: Click the arrow under the center column to open it. It shows four
+   sections - REFERENCES, TOOLS, DOWNLOADS, TUTORIALS. Click any section
+   and a small window lists its items; click an item to open the link or
+   launch the tool. Short lists are one column, longer ones two.
 
 
 --------------------------------------------------------------------------------

@@ -73,8 +73,9 @@ installed in your Diablo II: Resurrected folder.
       shared plugin_manifest.json beside the launcher and apply to
       every mod that uses that file. Same manifest covers both DLLs
       and JSON patches.
-* A collapsible bottom panel (click the arrow) with quick links to modding
-  references, your local tools, and tool downloads
+* A collapsible bottom panel (click the arrow) with four sections -
+  references, local tools, downloads, and tutorials - each opening a
+  window of links or tool launchers
 * Live mod-folder watching - install or remove a mod and the Refresh button
   lights up to let you know there's new state to pick up
 
@@ -106,272 +107,6 @@ No installer, no registry entries, no DLLs to copy. The launcher writes a
 single config file (launcher_config.json) next to itself to remember settings,
 rewrites assets\seeds.json when you save typed seed values, and updates
 assets\playtime.json after each gameplay session.
-
-
-================================================================================
-                      Angiris Launcher  -  BUILD INSTRUCTIONS
-================================================================================
-
-The launcher source is 35 .cpp files (split by concern - UI, layout, paint,
-Windows plumbing, plugin manager, loader-options modals, etc.) plus their
-.h headers and one optional resource script.
-
-Two supported build paths:
-
-  A) MSYS2 / MinGW-w64  (UCRT64)   - the project's primary build
-  B) Visual Studio 2019 or 2022    - works equally well, no source changes
-
-Both produce a single self-contained Angiris.exe with no DLL dependencies.
-
-
---------------------------------------------------------------------------------
-  FILES YOU NEED
---------------------------------------------------------------------------------
-
-Grab the whole source folder. It contains:
-
-    *.cpp / *.h              the launcher source
-    compile_mingw.bat        the MinGW build script - knows the .cpp list
-    angiris.rc               resource script (icon + version info) - optional
-    angiris.ico              the launcher icon - optional, referenced by .rc
-
-The .rc and .ico are optional: leaving them out just gives you an .exe with
-the default Windows icon. Functionality is identical.
-
-The batch script has a single SOURCES variable listing every .cpp file. If
-you add or remove one, edit that one line near the top of compile_mingw.bat
-and it flows to the sanity check, the display, and the g++ command.
-
-
-================================================================================
-  OPTION A:  MSYS2 / MinGW-w64
-================================================================================
-
-This is the build the project uses day-to-day. If you've ever built a
-Windows C++ program with MSYS2 before, you have everything you need.
-
-
-PREREQUISITES
---------------------------------------------------------------------------------
-
-1. Install MSYS2 from https://www.msys2.org/ (run the installer, accept the
-   defaults).
-
-2. Open the "MSYS2 UCRT64" shortcut from your Start menu (NOT "MSYS2 MSYS" -
-   the UCRT64 environment is what the launcher targets).
-
-3. Install the toolchain:
-
-       pacman -S mingw-w64-ucrt-x86_64-gcc
-
-   Accept the prompts. Takes a couple minutes.
-
-4. Confirm it works - from MSYS2 UCRT64:
-
-       g++ --version
-
-   You should see "g++.exe (Rev?, Built by MSYS2 project)" followed by a
-   version number (15.x is typical for current MSYS2).
-
-
-BUILD
---------------------------------------------------------------------------------
-
-Drop compile_mingw.bat in the same folder as the .cpp / .h files and
-double-click it. The script:
-
-  1. Locates g++ - either on PATH, or by scanning drives for an MSYS2 install
-  2. Verifies every listed .cpp source is present in the folder
-  3. Compiles angiris.rc via windres (skipped if no .rc is present)
-  4. Compiles + links every .cpp into a single static Angiris.exe
-
-About 30-60 seconds. On success it prompts to launch the result.
-
-
-WHAT THE SCRIPT DOES (so you can replicate manually)
---------------------------------------------------------------------------------
-
-If you'd rather invoke g++ yourself, the commands are:
-
-    windres -i angiris.rc -O coff -o angiris.res.o
-
-    g++ -O2 -std=c++17 -mwindows -municode ^
-        *.cpp angiris.res.o -o Angiris.exe ^
-        -static ^
-        -lgdiplus -lcomctl32 -lshell32 -ladvapi32 -lversion -lbcrypt ^
-        -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp
-
-Using *.cpp expands to every source file in the folder - simplest way to
-keep the command in sync with the source list. If you'd rather list them
-individually, copy the SOURCES variable from the top of compile_mingw.bat.
-
-Key flags:
-    -mwindows       Windows GUI subsystem (no console window)
-    -municode       UNICODE / _UNICODE both defined; wmain entry point
-    -static         link libgcc, libstdc++, and libwinpthread statically -
-                    no MinGW DLLs required at runtime
-    -std=c++17      the launcher uses C++17 features
-
-Linked libraries:
-    gdiplus     - the entire painted UI (frames, fonts, images, anti-alias)
-    comctl32    - standard Windows control style hooks
-    shell32     - Drag-and-drop file targeting, ShellExecute, etc.
-    advapi32    - registry access (D2R install path autodetect)
-    comdlg32    - folder-picker dialog
-    shlwapi     - path manipulation helpers
-    ole32, uuid - OLE plumbing pulled in by some shell APIs
-    winhttp     - update checks + launcher self-update download
-    version     - reading the file-version resource out of D2RLoader.exe
-                  (the version shown in the About modal)  [added v1.4.1]
-    bcrypt      - SHA-256 via Win32 CNG, used to verify the D2RLoader
-                  download against the checksum published on
-                  d2rloader.net  [added v1.4.1]
-
-
-================================================================================
-  OPTION B:  VISUAL STUDIO 2019 / 2022
-================================================================================
-
-VS Community is free for personal and open-source use. Slightly more clicks
-to set up than the MinGW path, but no source changes needed.
-
-
-PREREQUISITES
---------------------------------------------------------------------------------
-
-1. Install Visual Studio Community from
-   https://visualstudio.microsoft.com/vs/community/
-
-2. In the installer, check the "Desktop development with C++" workload.
-   This includes the MSVC compiler, the Windows SDK, and the rest of what
-   you'll need. Other workloads can be left off.
-
-
-CREATE THE PROJECT
---------------------------------------------------------------------------------
-
-1. File -> New -> Project
-2. Pick "Empty Project" (C++ template). Name it whatever you want -
-   "AngirisLauncher" works. Create.
-3. In Solution Explorer (the tree view on the right):
-       Right-click "Source Files" -> Add -> Existing Item, then in the
-            file picker open the launcher source folder and multi-select
-            EVERY .cpp file (Ctrl+A picks them all).
-       Right-click "Header Files" -> Add -> Existing Item, then multi-
-            select EVERY .h file the same way.
-       Right-click "Resource Files" -> Add -> Existing Item -> select
-            angiris.rc  AND  angiris.ico
-4. Open project properties: right-click the project name -> Properties
-   (or press Alt+Enter on the project).
-
-
-CONFIGURE THE PROJECT
---------------------------------------------------------------------------------
-
-At the top of the Properties dialog:
-    Configuration:  All Configurations    (so the settings apply to Debug
-                                          and Release)
-    Platform:       All Platforms          (or pick x64 if you only want
-                                          a 64-bit build)
-
-Then set each of these. The path on the left is the navigation tree in
-the Properties dialog.
-
-    Configuration Properties -> General
-        C++ Language Standard:        ISO C++17 Standard (/std:c++17)
-        Character Set:                Use Unicode Character Set
-
-    Configuration Properties -> C/C++ -> Code Generation
-        Runtime Library:              Multi-threaded (/MT)
-                                      (Release configuration)
-                                      Multi-threaded Debug (/MTd) for Debug.
-        ^^ This is the equivalent of MinGW's -static flag. Statically
-           links the C++ runtime so end users don't need vcredist.
-
-    Configuration Properties -> Linker -> System
-        SubSystem:                    Windows (/SUBSYSTEM:WINDOWS)
-
-    Configuration Properties -> Linker -> Input
-        Additional Dependencies:      add these to the front of the list
-                                      (semicolon-separated):
-
-            gdiplus.lib;comctl32.lib;shell32.lib;advapi32.lib;
-            comdlg32.lib;shlwapi.lib;ole32.lib;uuid.lib;winhttp.lib;
-            version.lib;bcrypt.lib
-
-
-BUILD
---------------------------------------------------------------------------------
-
-1. Set the configuration dropdown at the top of VS to "Release" and
-   "x64" (or "x86" for a 32-bit build).
-2. Build -> Build Solution  (or press F7, or Ctrl+Shift+B).
-3. Output ends up at:
-       <project folder>\x64\Release\AngirisLauncher.exe
-   (or x86\Release\ depending on platform)
-
-The .rc file is compiled automatically - VS handles rc.exe under the hood
-when the resource is in the project.
-
-
-================================================================================
-  COMMON GOTCHAS
-================================================================================
-
-* "Missing libgcc_s_seh-1.dll" when launching the MinGW build.
-      The build wasn't fully static. Make sure -static is on the g++ command
-      line; the supplied compile_mingw.bat already includes it.
-
-* "[ERROR] Missing source file: <path>\<name>.cpp" from compile_mingw.bat.
-      The batch script's SOURCES list refers to a file that isn't in your
-      folder. Either you're missing a .cpp from a partial checkout, or
-      you're building an older/newer source tree than the script expects.
-      Either sync the folder to a full set or edit the SOURCES line at the
-      top of compile_mingw.bat to match what you have.
-
-* "vcredist missing" / "MSVCP140.dll not found" on the Visual Studio build.
-      The Runtime Library setting was left at /MD (DLL CRT) instead of /MT.
-      Change to /MT and rebuild.
-
-* "Cannot find gdiplus.h" or similar header errors.
-      The Windows SDK isn't installed (Visual Studio) or the UCRT64
-      environment isn't being used (MinGW). Install / re-open the correct
-      environment.
-
-* The .exe runs but has no icon.
-      The .rc didn't get compiled in. For MinGW, make sure windres ran
-      successfully (check compile_errors.txt if the script left one). For
-      VS, make sure angiris.rc was added to the project under Resource
-      Files.
-
-* Antivirus flags the .exe.
-      Unsigned single-file binaries from unknown sources sometimes trigger
-      heuristics. Sign the binary with a code-signing certificate, or
-      submit it to the antivirus vendor's false-positive form, or just
-      tell your users to add an exclusion. There's no fix from the build
-      side.
-
-
-================================================================================
-  NOTES ON MAINTAINING SOURCE COMPATIBILITY
-================================================================================
-
-The launcher source is portable between MinGW UCRT64 and MSVC with no
-preprocessor branches. A few things to keep in mind if you modify it:
-
-* Wide-string printf format specifiers always use %ls, never %s.
-  MinGW's UCRT64 default interprets %s in wide-format calls as a NARROW
-  string (truncates at the first null byte). %ls is unambiguous and works
-  on both compilers.
-
-* The codebase is plain Win32 + GDI+. No third-party libraries pulled in
-  via vcpkg, NuGet, or pacman beyond what ships with the compiler.
-
-* C++17 is the floor. Some pieces (std::filesystem usage in helper code,
-  if-with-init, structured bindings) won't compile under older standards.
-
-
-================================================================================
 
 
 --------------------------------------------------------------------------------
@@ -408,6 +143,132 @@ internal mapping for any font that's been used to render text in the current
 process, which prevents the install from overwriting the active font file.
 If a future launcher release ships an updated or new font, drop the new
 .ttf into assets\fonts\ manually after installing the update.
+
+
+--------------------------------------------------------------------------------
+  BUILDING FROM SOURCE
+--------------------------------------------------------------------------------
+
+Most users never need this section - the release ships a ready-to-run
+Angiris.exe. It's here for anyone building from the source tree.
+
+The launcher is 35 .cpp files (split by concern - UI, layout, paint, Windows
+plumbing, plugin manager, loader-options modals, etc.) plus their .h headers
+and one optional resource script. Two supported build paths, both producing a
+single self-contained Angiris.exe with no DLL dependencies:
+
+    A) MSYS2 / MinGW-w64 (UCRT64)   - the project's primary build
+    B) Visual Studio 2019 or 2022   - works equally well, no source changes
+
+Files you need: the whole source folder - all *.cpp / *.h, plus
+compile_mingw.bat (the MinGW build script, which knows the .cpp list), and
+optionally angiris.rc + angiris.ico (icon and version info; leave them out
+and you just get the default Windows icon). The batch script has a single
+SOURCES variable listing every .cpp; add or remove a file and you edit that
+one line.
+
+
+  OPTION A:  MSYS2 / MinGW-w64  (primary build)
+  ---------------------------------------------
+
+  1. Install MSYS2 from https://www.msys2.org/ (accept the defaults).
+  2. Open the "MSYS2 UCRT64" shortcut (NOT "MSYS2 MSYS" - UCRT64 is what
+     the launcher targets).
+  3. Install the toolchain:
+         pacman -S mingw-w64-ucrt-x86_64-gcc
+  4. Confirm with  g++ --version  (15.x is typical for current MSYS2).
+
+  Then drop compile_mingw.bat in the folder with the source and double-click
+  it. The script locates g++, verifies every listed .cpp is present, compiles
+  angiris.rc via windres (skipped if absent), and links everything into one
+  static Angiris.exe. About 30-60 seconds.
+
+  To invoke g++ manually instead:
+
+      windres -i angiris.rc -O coff -o angiris.res.o
+
+      g++ -O2 -std=c++17 -mwindows -municode ^
+          *.cpp angiris.res.o -o Angiris.exe ^
+          -static ^
+          -lgdiplus -lcomctl32 -lshell32 -ladvapi32 -lversion -lbcrypt ^
+          -lcomdlg32 -lshlwapi -lole32 -luuid -lwinhttp
+
+  Key flags: -mwindows (GUI subsystem, no console), -municode (UNICODE +
+  wmain entry), -static (no MinGW DLLs at runtime), -std=c++17.
+
+  Linked libraries:
+      gdiplus     - the entire painted UI (frames, fonts, images, AA)
+      comctl32    - standard Windows control style hooks
+      shell32     - drag-and-drop targeting, ShellExecute
+      advapi32    - registry access (D2R install path autodetect)
+      comdlg32    - folder-picker dialog
+      shlwapi     - path manipulation helpers
+      ole32, uuid - OLE plumbing pulled in by some shell APIs
+      winhttp     - update checks + launcher self-update download
+      version     - reading D2RLoader.exe's file-version resource (the
+                    version shown in the About modal)
+      bcrypt      - SHA-256 via Win32 CNG, verifying the D2RLoader download
+                    against the checksum published on d2rloader.net
+
+
+  OPTION B:  Visual Studio 2019 / 2022
+  ------------------------------------
+
+  1. Install Visual Studio Community (free) from
+     https://visualstudio.microsoft.com/vs/community/ with the "Desktop
+     development with C++" workload checked.
+  2. File -> New -> Empty Project (C++).
+  3. In Solution Explorer: add all .cpp under Source Files, all .h under
+     Header Files, and angiris.rc + angiris.ico under Resource Files
+     (Add -> Existing Item, multi-select).
+  4. Project Properties (Alt+Enter), Configuration: All Configurations:
+         General -> C++ Language Standard:  ISO C++17 (/std:c++17)
+         General -> Character Set:          Use Unicode Character Set
+         C/C++ -> Code Generation -> Runtime Library:
+                  Multi-threaded (/MT) for Release,
+                  Multi-threaded Debug (/MTd) for Debug
+                  (the equivalent of MinGW's -static - no vcredist needed)
+         Linker -> System -> SubSystem:     Windows (/SUBSYSTEM:WINDOWS)
+         Linker -> Input -> Additional Dependencies (semicolon-separated):
+             gdiplus.lib;comctl32.lib;shell32.lib;advapi32.lib;
+             comdlg32.lib;shlwapi.lib;ole32.lib;uuid.lib;winhttp.lib;
+             version.lib;bcrypt.lib
+  5. Set Release / x64 and Build -> Build Solution (F7). Output at
+     <project>\x64\Release\AngirisLauncher.exe. The .rc compiles
+     automatically.
+
+
+  BUILD GOTCHAS
+  -------------
+
+  * "Missing libgcc_s_seh-1.dll" (MinGW) - the build wasn't fully static;
+    -static must be on the g++ line (compile_mingw.bat already has it).
+  * "[ERROR] Missing source file: ...cpp" from compile_mingw.bat - the
+    SOURCES list names a file not in your folder. Sync to a full checkout
+    or edit the SOURCES line to match.
+  * "MSVCP140.dll not found" (Visual Studio) - Runtime Library was left at
+    /MD instead of /MT. Change and rebuild.
+  * "Cannot find gdiplus.h" - Windows SDK not installed (VS) or not in the
+    UCRT64 environment (MinGW).
+  * .exe runs but has no icon - angiris.rc wasn't compiled in (check windres
+    ran for MinGW; check the .rc is under Resource Files for VS).
+  * Antivirus flags the .exe - unsigned single-file binaries sometimes trip
+    heuristics. Sign it, submit a false-positive report, or have users add
+    an exclusion. Nothing to fix build-side.
+
+
+  SOURCE COMPATIBILITY NOTES
+  --------------------------
+
+  The source is portable between MinGW UCRT64 and MSVC with no preprocessor
+  branches. If you modify it:
+
+  * Wide-string printf specifiers always use %ls, never %s. MinGW's UCRT64
+    reads %s in wide-format calls as a NARROW string (truncates at the first
+    null). %ls is unambiguous on both compilers.
+  * Plain Win32 + GDI+ only - no vcpkg / NuGet / pacman third-party libs
+    beyond what ships with the compiler.
+  * C++17 is the floor (std::filesystem, if-with-init, structured bindings).
 
 
 --------------------------------------------------------------------------------
@@ -475,15 +336,28 @@ RIGHT COLUMN
         button.
 
 BOTTOM PANEL (hidden by default - click the arrow under the center column)
-    REFERENCES        - Eez's File Guides, Phrozen Keep, Amazon Basin
-    TOOLS AND PROGRAMS - Edit TXT / Sprite / JSON / Particles / Textures /
-                         Models (launches your local tools)
-    DOWNLOADS         - AFJ Pro Text Editor, Eez's Sprite Editor,
-                         Visual Basic Code
+    A single row of four section buttons:
 
-Each section has its own background sampled from a different region of
-bg_stone.png, so the panels read as distinct stone surfaces rather than one
-uniform tile.
+        REFERENCES   TOOLS   DOWNLOADS   TUTORIALS
+
+    Clicking a section opens a small window listing that section's items.
+    Each item is a button: link items open a page in your browser, tool
+    items launch a locally-installed editor. Sections with up to four
+    items show a single column; longer ones split into two, and the
+    window widens to match.
+
+        REFERENCES - File Guides, Phrozen Keep, Amazon Basin,
+                     Paul Siramy Website
+        TOOLS      - Edit TXT / Sprite / JSON / Models / Textures /
+                     Particles (launches your local tools)
+        DOWNLOADS  - Text Editor, Sprite Editor, Visual Basic Code
+        TUTORIALS  - a growing set of guide links (level creation,
+                     larger stash, runewords, items and sets,
+                     superuniques, and a beginner's guide)
+
+    The section buttons carry the D2R menu font with wider letter-spacing
+    so they read as titles; whichever font you pick in the toolbar applies
+    to them like everything else.
 
 
 --------------------------------------------------------------------------------
@@ -723,14 +597,32 @@ RECENTS LOGIC
 The toolbar sits under the action buttons in the center column.
 
 SCALE
-    A 3-state slider. The percentages depend on your Windows display scaling:
+    A 3-state slider (or a dropdown - see scale_as_dropdown under CONFIG
+    FILES). Which three percentages you get depends on BOTH your Windows
+    display scaling and your screen resolution:
 
-        Windows at 100%   ->  100% / 115% / 127%
-        Windows at 150%+  ->   75% /  85% / 100%
+                      Windows 100%      Windows 125%      Windows 150%
+        1080p          75/85/100         50/65/75          50/65/75
+        1440p          100/115/127       75/85/100         65/75/85
+        4K             100/115/127       85/100/115        75/85/100
 
-    The text box above the slider always shows the current percentage. Click
-    the slider to cycle through the three values; the UI resizes immediately
-    and the window resizes to match.
+    Your Windows scaling decides which set you're offered - it's your
+    stated preference for how big things should be, so a 4K display always
+    gets exactly what it asks for. Your resolution then acts as a limit:
+    if a set would produce a window too big for your screen, it shifts
+    down to one that fits. That's why 1080p gets smaller options than 4K
+    at the same Windows scaling - it has far less room to work with.
+
+    The text box above the slider always shows the current percentage.
+    Click the slider to cycle through the three values; the UI resizes
+    immediately and the window resizes to match.
+
+    A scale whose window wouldn't fit your monitor is never applied - it
+    steps down to the largest one that does. This matters because the
+    Scale control sits near the bottom of the window: without the check,
+    picking too large a value would put the control itself off-screen,
+    with no way to undo it. The check runs at startup too, so a setting
+    carried over from a larger monitor is corrected automatically.
 
     If you change Windows display scaling between sessions, the launcher
     notices on next start and resets the UI scale to 1.0 - this prevents a
@@ -878,10 +770,15 @@ hover-grow.
 The About button in the left rail opens a themed modal rather than
 launching README.txt in Notepad (which is what it did before v1.4.1).
 
+The Help button (also in the left rail) opens a similar reader showing
+FAQ.txt inside the launcher - scroll with the mouse wheel. Below the text
+is a "Need More Help?" prompt with a Discord button that opens the
+D2RLoader community server. Close or Esc dismisses it.
+
   HUB VIEW
   --------
 
-      Angiris  v1.4.1
+      Angiris  v1.5
       D2RLoader  v1.0.1 - beta        (or "Not detected")
 
       [   Latest D2RLoader   ]        <- download + install button
@@ -1165,16 +1062,17 @@ it's a plugin or a patch.
   TOOLS (BOTTOM PANEL)
 --------------------------------------------------------------------------------
 
-The TOOLS AND PROGRAMS section launches your locally-installed modding tools:
+Opening the TOOLS section (from the bottom panel) lists six launchers for
+your locally-installed modding tools:
 
-    Edit TXT Files    -> your TXT/Excel editor (e.g. AFJ Sheet Editor Pro)
+    Edit TXT Files    -> your TXT/Excel editor
     Edit Sprite Files -> your sprite editor
     Edit JSON Files   -> your JSON/text editor (e.g. VS Code)
     Edit Models       -> your model editor
     Edit Textures     -> your texture editor
     Edit Particles    -> your particle editor
 
-The first time you click a tool button, the launcher searches your tools folder
+The first time you click a tool, the launcher searches your tools folder
 for a matching .exe (resolving .lnk shortcuts), then caches the path so later
 clicks are instant. If it can't find the tool, you'll be prompted to locate it
 manually; your choice is cached.

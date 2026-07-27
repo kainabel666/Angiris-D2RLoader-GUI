@@ -8,6 +8,7 @@
 #include "fs_utils.h"    // MakeTempInstallDir, DeleteFolderRecursive,
                          // RunTarExtract, CopyTreeIntoLogged
 #include "assets.h"      // DestroyAssetCache — release PNG file handles
+#include "paint_main.h"  // InvalidateStoneCache — drop the cached backdrop
                          // before the in-place install overwrites them
 #include "fonts.h"       // UnloadFonts — RemoveFontResourceEx every
                          // bundled .ttf so they're unlocked for overwrite
@@ -728,6 +729,10 @@ void StartLauncherUpdateInstall(HWND parent) {
     // Release everything the installer would otherwise have to fight.
     // GDI+ Bitmap destructors release their underlying file handles;
     // PrivateFontCollection destructor releases the .ttf handles.
+    // The cached stone backdrop holds its own composited bitmaps (not
+    // file handles), but it was rendered FROM the old assets — drop it
+    // so anything painted after this point rebuilds from the new files.
+    InvalidateStoneCache();
     DestroyAssetCache();
     UnloadFonts();
 

@@ -629,99 +629,11 @@ static void PaintLaunchOptions(Graphics& g, const BodyLayout& B) {
 }
 
 static void PaintBottomPanel(Graphics& g, int W, int H) {
-    using namespace LO;
-    // bodyH matches Layout() — always the frame's native height. The
-    // expansion panel sits below this line, not by shrinking the body.
-    int frameNativeH = 1024;
-    if (Gdiplus::Bitmap* fm = AssetImage(L"frame_main.png"))
-        frameNativeH = (int)fm->GetHeight();
-    int bodyH = frameNativeH;
-
-    // The frame_main / frame_expand assets provide all the bottom chrome.
-    // Nothing to draw if the panel is collapsed.
-    if (!g_bottomExpanded) return;
-
-    // Inset content by frame_expand.png's measured filigree (mirrors the
-    // child-button positioning in Layout()).
-    FrameInset fe = MeasureFrameInset(L"frame_expand.png");
-    int feL = (fe.left  > 0 ? fe.left  : 16) + 8;
-    int feR = (fe.right > 0 ? fe.right : 16) + 8;
-    int feT = (fe.top   > 0 ? fe.top   : 22) + 4;
-
-    int panelTop = bodyH + feT;
-    int colGap   = EXP_COL_GAP;          // internal Tools-column gap (no divider)
-    int secGap   = EXP_SEC_GAP;          // section gap (holds a divider)
-
-    // Match Layout()'s section X positions. Sections 1 and 3 are EXP_BTN_W
-    // wide (single column); section 2 (Tools) is two columns plus the
-    // internal gap. Section gaps (secGap) are wider than the internal gap so
-    // the dividers clear the button HWNDs.
-    int sec1W = EXP_BTN_W;
-    int sec3W = EXP_BTN_W;
-    int sec2W = EXP_BTN_W * 2 + colGap;
-    int framedW   = W - feL - feR;
-    int totalBtnW = sec1W + sec2W + sec3W;
-    int slack     = framedW - totalBtnW - secGap * 2;
-    int leftPad   = slack / 2;
-    int sec1X = feL + leftPad;
-    int sec2X = sec1X + sec1W + secGap;
-    int sec3X = sec2X + sec2W + secGap;
-
-    // Divider centers, and column-centered X for the single-column sections
-    // (mirror Layout()). References/Downloads are centered between the panel
-    // edge and the nearest divider rather than anchored at sec1X/sec3X.
-    int div1X = sec1X + sec1W + secGap / 2;
-    int div2X = sec2X + sec2W + secGap / 2;
-    int refBtnX = (feL + div1X - EXP_BTN_W) / 2;
-    int dlBtnX  = (div2X + (W - feR) - EXP_BTN_W) / 2;
-
-    StringFormat sfC;
-    sfC.SetAlignment(StringAlignmentCenter);
-    sfC.SetLineAlignment(StringAlignmentCenter);
-    SolidBrush gold(Tok::Gold);
-
-    // Smaller title font (g_fExpHdr, 18px) in the tightened header band.
-    auto hdr = [&](const wchar_t* text, int x, int w) {
-        g.DrawString(text, -1, g_fExpHdr,
-                     RectF((REAL)x, (REAL)panelTop, (REAL)w, (REAL)EXP_HDR_H),
-                     &sfC, &gold);
-    };
-    // References/Downloads titles centered over their (column-centered)
-    // buttons; Tools stays centered over its two-column block.
-    hdr(L"REFERENCES",         refBtnX, EXP_BTN_W);
-    hdr(L"TOOLS AND PROGRAMS", sec2X,   sec2W);
-    hdr(L"DOWNLOADS",          dlBtnX,  EXP_BTN_W);
-
-    // ── Vertical dividers flanking the Tools column ──────────────────────
-    // A mirrored pair centered in the two inter-section gaps, running the
-    // full section height. Asset-driven; a thin bronze rule fades in as a
-    // fallback if a PNG is missing.
-    const int divTop = panelTop + LO::EXP_DIVIDER_TOP_PAD;
-    auto divider = [&](const wchar_t* name, int gapCenter) {
-        if (Gdiplus::Bitmap* dv = AssetImage(name)) {
-            int dw = (int)dv->GetWidth();
-            DrawAssetAt(g, dv, gapCenter - dw / 2, divTop);
-        } else {
-            // Fallback: a 2px bronze rule that fades at both ends so it
-            // doesn't read as a hard bar.
-            int h = LO::EXP_DIVIDER_FALLBACK_H;
-            REAL x = (REAL)gapCenter - 1.0f;
-            LinearGradientBrush rule(
-                RectF(x, (REAL)divTop, 2.0f, (REAL)h),
-                GPA(0,   0x8B, 0x5A, 0x2B),
-                GPA(200, 0x8B, 0x5A, 0x2B),
-                LinearGradientModeVertical);
-            // Symmetric fade: transparent at top & bottom, solid mid.
-            REAL pos[3]   = { 0.0f, 0.5f, 1.0f };
-            Color cols[3] = { GPA(0, 0x8B,0x5A,0x2B),
-                              GPA(210,0x8B,0x5A,0x2B),
-                              GPA(0, 0x8B,0x5A,0x2B) };
-            rule.SetInterpolationColors(cols, pos, 3);
-            g.FillRectangle(&rule, RectF(x, (REAL)divTop, 2.0f, (REAL)h));
-        }
-    };
-    divider(L"left_expand_divider.png",  div1X + LO::EXP_DIVIDER_X_NUDGE);
-    divider(L"right_expand_divider.png", div2X + LO::EXP_DIVIDER_X_NUDGE);
+    // The four section BUTTONS carry their own labels, and frame_expand.png
+    // provides all the panel chrome, so there's nothing to paint here — no
+    // headers, no dividers. Kept as a no-op hook in case the panel later
+    // needs painted content behind the buttons.
+    (void)g; (void)W; (void)H;
 }
 
 static void PaintToolbarControl(Graphics& g, const RECT& r,
@@ -905,27 +817,58 @@ static void DrawTitleBarButtonFallback(Gdiplus::Graphics& g,
     g.SetSmoothingMode(prevSmooth);
 }
 
-void PaintBody(HDC hdc, int W, int H) {
-    // W and H arrive in LOGICAL pixels (the caller converts via U() before
-    // passing them in). The Graphics gets a ScaleTransform that maps every
-    // logical coordinate to its physical pixel position, so the entire
-    // paint body below can be written exactly as it was when g_scale was
-    // implicitly 1.0 — frame_main, the stone slices, frame_panel_left/right,
-    // the gem ornament, mod-list painting, the launch-options panel, the
-    // logo, the title-bar buttons, everything inherits the scale.
-    Graphics g(hdc);
-    g.ScaleTransform((REAL)g_scale, (REAL)g_scale);
-    g.SetSmoothingMode(SmoothingModeAntiAlias);
-    g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
 
-    // ── Layered backdrop ────────────────────────────────────────────────
-    //   1. Stone texture covers the full window (collapsed-state region).
-    //      The expanded bottom area below WIN_H is intentionally unframed.
-    //   2. Frame overlay (ornate filigree, gem ornaments) on top.
-    //   3. D2RLOADER logo at native size in the left rail.
-    //   4. frame_panel_right.png (the right column's framed three-panel
-    //      asset) drawn at native size, positioned by ComputeBodyLayout.
-    // Any of these may be nullptr (asset missing); the helpers no-op then.
+// Cache slots for the static stone backdrop. [0] = collapsed window,
+// [1] = expanded — two slots so toggling the bottom panel alternates
+// between prebuilt surfaces instead of rebuilding on every toggle.
+//
+// The surface is a DIB SECTION with its own memory DC, not a GDI+ Bitmap,
+// so the per-paint blit can go through GDI's BitBlt. Measured: even a
+// 1:1, untransformed, opaque GDI+ DrawImage of this surface costs ~200 ms,
+// while BitBlt of the same pixels is a straight memory copy. GDI+ is used
+// only to RENDER into the surface (once), never to blit out of it.
+struct StoneCache {
+    HDC     memdc = nullptr;    // memory DC holding the DIB
+    HBITMAP dib   = nullptr;    // the DIB section itself
+    HBITMAP oldbm = nullptr;    // original bitmap, restored before delete
+    int     w     = 0;
+    int     h     = 0;
+    double  scale = 0.0;
+};
+static StoneCache g_stoneCache[2];
+
+static void FreeStoneSlot(StoneCache& sc) {
+    if (sc.memdc) {
+        if (sc.oldbm) SelectObject(sc.memdc, sc.oldbm);
+        DeleteDC(sc.memdc);
+    }
+    if (sc.dib) DeleteObject(sc.dib);
+    sc.memdc = nullptr;
+    sc.dib   = nullptr;
+    sc.oldbm = nullptr;
+    sc.w = sc.h = 0;
+    sc.scale = 0.0;
+}
+
+void InvalidateStoneCache() {
+    for (StoneCache& sc : g_stoneCache) FreeStoneSlot(sc);
+}
+
+// ── Static stone backdrop (cached) ───────────────────────────────────
+// The base stone fill plus the seven per-region stone slices. These are
+// pure texture blits with no dynamic content, which makes them cacheable
+// — and they need to be, because they were measured at ~700 ms per paint.
+//
+// The cost is NOT the bitmaps: it's that PaintBody runs under a
+// ScaleTransform, and any non-identity world transform pushes GDI+ off
+// its fast blit path onto a general per-pixel resample. Measured on the
+// same 1536x1024 texture:
+//     with transform ......... 128 ms
+//     no transform ...........  29 ms
+//     no transform + 24bpp/SourceCopy 4.9 ms
+// So we render this layer ONCE into an offscreen bitmap that is already
+// at device scale, then blit that bitmap untransformed on every paint.
+static void PaintStaticStone(Gdiplus::Graphics& g, int W, int H) {
     if (Gdiplus::Bitmap* bgStone = AssetImage(L"bg_stone.png")) {
         // Stone covers the COLLAPSED window region (top 1024px). When the
         // bottom panel is expanded, that area is drawn separately by
@@ -1006,10 +949,27 @@ void PaintBody(HDC hdc, int W, int H) {
         stoneSlice(B.rightX, B.loY + B.loH, B.rightW,
                    (B.rightY + B.rightH) - (B.loY + B.loH),          700, 850);
     }
+}
+
+// ── Static frame chrome (cached alongside the stone) ─────────────────
+// frame_main, the corner accents, the bottom-expansion frame, both panel
+// frames and the top gem ornament. All static for a given size + scale +
+// expand state, so they render into the same cached surface as the stone
+// and ride along on its single BitBlt.
+//
+// These assets have TRANSPARENT edges, so unlike the stone they must
+// blend (SourceOver) — but that blend now happens once at cache-build
+// time instead of on every paint, which is the whole point.
+//
+// NOT included: the logo and version label. The logo is static but the
+// version label under it changes colour when an update is available, and
+// they're drawn as one block — so both stay in the live paint path. They
+// are cheap (a small bitmap + one string).
+static void PaintStaticFrame(Gdiplus::Graphics& g, int W, int H) {
     if (Gdiplus::Bitmap* frame = AssetImage(L"frame_main.png")) {
-        // Draw at native size, top-left aligned. No stretch.
+        // Native size, top-left aligned, no stretch.
         int frameH = (int)frame->GetHeight();   // native 1024
-        DrawAssetStretched(g, frame, 0, 0, W, frameH);
+        g.DrawImage(frame, 0, 0, W, frameH);
     }
     // Filigree corner accents on the four frame corners. (Asset-or-fallback.)
     PaintCornerAccents(g, W);
@@ -1023,6 +983,135 @@ void PaintBody(HDC hdc, int W, int H) {
             DrawAssetAt(g, frExp, 0, collapsedH);
         }
     }
+    // Panel asset draws at native size, positioned per ComputeBodyLayout.
+    // Drawn before the panel content so the bronze chrome sits behind text.
+    if (Gdiplus::Bitmap* panel = AssetImage(L"frame_panel_right.png")) {
+        BodyLayout B = ComputeBodyLayout(W, H);
+        DrawAssetAt(g, panel, B.rightX, B.rightY);
+    }
+    // Center mod-list panel frame: drawn at NATIVE 1:1 (660x955), anchored at
+    // (centerX, bodyTop + PANEL_LEFT_Y_NUDGE) so its top sits at the inner
+    // edge of the frame_main top filigree.
+    if (Gdiplus::Bitmap* lpanel = AssetImage(L"frame_panel_left.png")) {
+        BodyLayout Bl = ComputeBodyLayout(W, H);
+        LeftPanelGeom lg = ComputeLeftPanelGeom(Bl);
+        DrawAssetAt(g, lpanel, lg.x, lg.y);
+    }
+    // Top centerpiece gem ornament — drawn AFTER frame_panel_left so the gem
+    // layers on top where the panel's top extends up into the filigree band.
+    PaintTopOrnament(g, W);
+}
+
+void PaintBody(HDC hdc, int W, int H) {
+    // W and H arrive in LOGICAL pixels (the caller converts via U() before
+    // passing them in). The Graphics gets a ScaleTransform that maps every
+    // logical coordinate to its physical pixel position, so the entire
+    // paint body below can be written exactly as it was when g_scale was
+    // implicitly 1.0 — frame_main, the stone slices, frame_panel_left/right,
+    // the gem ornament, mod-list painting, the launch-options panel, the
+    // logo, the title-bar buttons, everything inherits the scale.
+    Graphics g(hdc);
+    g.ScaleTransform((REAL)g_scale, (REAL)g_scale);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+    // Interpolation mode governs how DrawImage resamples when a world
+    // transform is active — and PaintBody runs under a ScaleTransform of
+    // g_scale (1.5 at 150% DPI), so EVERY DrawImage here is resampled.
+    // GDI+ defaults to bicubic (16 taps/pixel) once a transform is set,
+    // which on the large stone + frame textures cost ~500 ms per paint
+    // (measured). These are big, noisy textures scaled by a uniform
+    // factor; bilinear ("low") is visually indistinguishable here and a
+    // fraction of the cost. Individual draws that genuinely need bicubic
+    // (e.g. the logo, downscaled art) can still opt back in locally.
+    g.SetInterpolationMode(InterpolationModeLowQuality);
+    g.SetPixelOffsetMode(PixelOffsetModeHalf);
+
+    // ── Layered backdrop ────────────────────────────────────────────────
+    //   1. Stone texture covers the full window (collapsed-state region).
+    //      The expanded bottom area below WIN_H is intentionally unframed.
+    //   2. Frame overlay (ornate filigree, gem ornaments) on top.
+    //   3. D2RLOADER logo at native size in the left rail.
+    //   4. frame_panel_right.png (the right column's framed three-panel
+    //      asset) drawn at native size, positioned by ComputeBodyLayout.
+    // Any of these may be nullptr (asset missing); the helpers no-op then.
+    // ── Static stone backdrop (from cache) ──────────────────────────────
+    // Rendered once into a device-scale offscreen bitmap and blitted
+    // untransformed here. See PaintStaticStone for why: under the body's
+    // ScaleTransform these texture blits cost ~700 ms per paint; as a
+    // single pre-scaled, untransformed, opaque blit it's a few ms.
+    //
+    // Two slots so expanding/collapsing doesn't thrash the cache — the
+    // window height changes between those states, and alternating would
+    // otherwise rebuild every single toggle. Each state builds once.
+    {
+        int slot   = g_bottomExpanded ? 1 : 0;
+        int physW  = (int)(W * g_scale + 0.5);
+        int physH  = (int)(H * g_scale + 0.5);
+        StoneCache& sc = g_stoneCache[slot];
+
+        if (!sc.memdc || sc.w != physW || sc.h != physH || sc.scale != g_scale) {
+            FreeStoneSlot(sc);
+            if (physW > 0 && physH > 0) {
+                // Top-down 32bpp DIB section. 32bpp (not 24) because a
+                // 32bpp DIB is already the screen's layout, so BitBlt is a
+                // straight memory copy with no per-row unpacking. Negative
+                // height = top-down rows, matching GDI+'s orientation.
+                BITMAPINFO bi = {};
+                bi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+                bi.bmiHeader.biWidth       =  physW;
+                bi.bmiHeader.biHeight      = -physH;
+                bi.bmiHeader.biPlanes      = 1;
+                bi.bmiHeader.biBitCount    = 32;
+                bi.bmiHeader.biCompression = BI_RGB;
+
+                void* bits = nullptr;
+                HDC screen = GetDC(nullptr);
+                sc.dib = CreateDIBSection(screen, &bi, DIB_RGB_COLORS,
+                                          &bits, nullptr, 0);
+                ReleaseDC(nullptr, screen);
+
+                if (sc.dib) {
+                    sc.memdc = CreateCompatibleDC(nullptr);
+                    if (sc.memdc) {
+                        sc.oldbm = (HBITMAP)SelectObject(sc.memdc, sc.dib);
+                        {
+                            // Render the stone layer into the DIB via GDI+.
+                            // This happens ONCE per size/scale/state.
+                            Gdiplus::Graphics cg(sc.memdc);
+                            cg.SetSmoothingMode(SmoothingModeAntiAlias);
+                            cg.SetInterpolationMode(InterpolationModeLowQuality);
+                            cg.SetPixelOffsetMode(PixelOffsetModeHalf);
+                            cg.ScaleTransform((REAL)g_scale, (REAL)g_scale);
+                            PaintStaticStone(cg, W, H);
+                            PaintStaticFrame(cg, W, H);
+                        }   // Graphics destroyed → all drawing flushed to the DIB
+                        sc.w = physW; sc.h = physH; sc.scale = g_scale;
+                    } else {
+                        DeleteObject(sc.dib);
+                        sc.dib = nullptr;
+                    }
+                }
+            }
+        }
+
+        if (sc.memdc) {
+            // Blit via GDI, not GDI+. Both surfaces are 32bpp top-down at
+            // the same size, so this is a plain memory copy — no resample,
+            // no format conversion, no alpha compositing. GetHDC/ReleaseHDC
+            // is the documented way to issue GDI calls against a surface a
+            // Graphics is currently attached to.
+            HDC raw = g.GetHDC();
+            BitBlt(raw, 0, 0, sc.w, sc.h, sc.memdc, 0, 0, SRCCOPY);
+            g.ReleaseHDC(raw);
+        } else {
+            // Cache unavailable (allocation failed) — draw direct so the
+            // UI is still correct, just slow.
+            PaintStaticStone(g, W, H);
+            PaintStaticFrame(g, W, H);
+        }
+    }
+
+
     if (Gdiplus::Bitmap* logo = AssetImage(L"logo_d2rloader.png")) {
         // The logo's visual weight is left-biased (the flame extends to the
         // image's left edge while the right side has white space after the
@@ -1107,23 +1196,6 @@ void PaintBody(HDC hdc, int W, int H) {
                          verRect, &verFmt, &verFill);
         }
     }
-    // Panel asset draws at native size, positioned per ComputeBodyLayout.
-    // Drawn before the panel content so the bronze chrome sits behind text.
-    if (Gdiplus::Bitmap* panel = AssetImage(L"frame_panel_right.png")) {
-        BodyLayout B = ComputeBodyLayout(W, H);
-        DrawAssetAt(g, panel, B.rightX, B.rightY);
-    }
-    // Center mod-list panel frame: drawn at NATIVE 1:1 (660×955), anchored at
-    // (centerX, bodyTop + PANEL_LEFT_Y_NUDGE) so its top sits at the inner
-    // edge of the frame_main top filigree.
-    if (Gdiplus::Bitmap* lpanel = AssetImage(L"frame_panel_left.png")) {
-        BodyLayout Bl = ComputeBodyLayout(W, H);
-        LeftPanelGeom lg = ComputeLeftPanelGeom(Bl);
-        DrawAssetAt(g, lpanel, lg.x, lg.y);
-    }
-    // Top centerpiece gem ornament — drawn AFTER frame_panel_left so the gem
-    // layers on top where the panel's top extends up into the filigree band.
-    PaintTopOrnament(g, W);
 
     PaintLeftRail(g, W, H);
 

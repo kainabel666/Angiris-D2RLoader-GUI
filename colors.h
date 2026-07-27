@@ -97,9 +97,13 @@ namespace Sp {
 
 struct ColorPreset { const wchar_t* label; COLORREF rgb; };
 
-// Defined in colors.cpp. Read-only after init.
-extern const ColorPreset g_colorPresets[12];
+// Number of entries in g_colorPresets. Declared BEFORE the array so it
+// supplies the bound — keeping a literal size on the extern lets the two
+// drift apart the moment a preset is added.
 constexpr int kNumColorPresets = 12;
+
+// Defined in colors.cpp. Read-only after init.
+extern const ColorPreset g_colorPresets[kNumColorPresets];
 
 // Reassign Tok::Gold and Tok::GoldBright based on g_cfg.fontColorIdx,
 // then force a full RedrawWindow on g_hwMain so every paint site

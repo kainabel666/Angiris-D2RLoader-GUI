@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════
 //
 //  Locating and launching the external modding tools the launcher
-//  exposes via the Modding column buttons (AFJ Sheet Editor Pro,
+//  exposes via the Modding column buttons (text/sheet editor,
 //  VS Code, SpriteEdit, etc.). Each tool has a cached absolute path
 //  in g_cfg; if that path is missing or stale, we fall back to a
 //  recursive search under the user's configured tools folder, and

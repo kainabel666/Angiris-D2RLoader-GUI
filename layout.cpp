@@ -1013,87 +1013,48 @@ void Layout(int W, int H) {
     if (g_bottomExpanded) {
         // Inset content by frame_expand.png's measured filigree, so the
         // button rows sit inside the bronze border. Falls back to a small
-        // default inset if the asset is missing.
+        // Frame insets. NOTE: MeasureFrameInset detects the top/bottom
+        // filigree fine (full-width bands) but returns garbage for left/right
+        // on frame_expand — its side filigree is too thin to cross the
+        // 30%-opaque column threshold, so the scan runs to W/2 and reports
+        // ~768px. Use the measured top/bottom, but FIXED side insets that
+        // match the ~26px side filigree.
         FrameInset fe = MeasureFrameInset(L"frame_expand.png");
-        int feL = (fe.left  > 0 ? fe.left  : 16) + 8;
-        int feR = (fe.right > 0 ? fe.right : 16) + 8;
-        int feT = (fe.top   > 0 ? fe.top   : 22) + 4;
+        int feL = EXP_SIDE_INSET;
+        int feR = EXP_SIDE_INSET;
+        int feT = (fe.top    > 0 ? fe.top    : 26) + 4;
+        int feB = (fe.bottom > 0 ? fe.bottom : 26) + 4;
 
         int panelTop = bodyH + feT;         // below the frame's top filigree
-        int panelH   = EXPAND_H;
-        int colGap   = EXP_COL_GAP;          // internal Tools-column gap (no divider)
-        int secGap   = EXP_SEC_GAP;          // section gap (holds a divider)
-        const int P  = BTN_OVERFLOW_PAD;
+        const int P  = EXP_OVERFLOW_PAD;
 
-        // Button dimensions: narrowed from nav width (see LO::EXP_BTN_W) so
-        // each button sits inside its section with padding, and the section
-        // gaps stay wide enough that the dividers clear the button HWNDs'
-        // overflow pads. Height is shorter (58 vs 76); 9-slice rendering
-        // handles the mismatch so the gem corners stay pixel-perfect.
-        int sec1W = EXP_BTN_W;
-        int sec3W = EXP_BTN_W;
-        // Section 2 (Tools, 2-column) is twice as wide plus the internal gap.
-        int sec2W = EXP_BTN_W * 2 + colGap;
-        // Distribute leftover space symmetrically as left/right edge padding.
-        int framedW  = W - feL - feR;
-        int totalBtnW = sec1W + sec2W + sec3W;
-        int slack    = framedW - totalBtnW - secGap * 2;
-        int leftPad  = slack / 2;
-        int sec1X = feL + leftPad;
-        int sec2X = sec1X + sec1W + secGap;
-        int sec3X = sec2X + sec2W + secGap;
+        // Four section buttons across a single row, evenly spaced. The row
+        // is vertically centered in the panel's interior clearance (between
+        // the top and bottom filigree). Buttons are 320x64 (EXP_SECTION_W/H).
+        int framedW = W - feL - feR;
+        int nBtn    = 4;
+        int btnW    = EXP_SECTION_W;
+        int btnH    = EXP_SECTION_H;
+        // Distribute the leftover width as (nBtn+1) equal gaps: one before
+        // each button and one after the last, so the row is edge-balanced.
+        int totalBtnW = nBtn * btnW;
+        int gap = (framedW - totalBtnW) / (nBtn + 1);
+        if (gap < 0) gap = 0;
+        int startX = feL + gap;
 
-        // Divider centers (mirror PaintBottomPanel). The single-column
-        // sections are centered within the space between the panel edge and
-        // the nearest divider — not left/right-anchored at sec1X/sec3X — so
-        // References and Downloads sit centered in their columns.
-        int div1X = sec1X + sec1W + secGap / 2;
-        int div2X = sec2X + sec2W + secGap / 2;
-        int refBtnX = (feL + div1X - EXP_BTN_W) / 2;
-        int dlBtnX  = (div2X + (W - feR) - EXP_BTN_W) / 2;
+        // Vertical center within the interior (panelTop .. bottom filigree).
+        int interiorH = EXPAND_H - feT - feB;
+        int rowY = panelTop + (interiorH - btnH) / 2;
 
-        int hdrH    = EXP_HDR_H;            // sub-section header band (tightened)
-        int rowH    = EXP_BTN_H;
-        int rowGap  = EXP_ROW_GAP;          // breathing room between rows (tightened)
-        int firstRowY = panelTop + hdrH + 8;
-
-        // Section 1: REFERENCES (3 stacked, single column — centered in column)
-        for (int i = 0; i < 3; ++i) {
-            if (!g_hwBottomRefs[i]) continue;
-            int ry = firstRowY + i * (rowH + rowGap);
-            SPosL(g_hwBottomRefs[i], nullptr,
-                         refBtnX - P, ry - P,
-                         EXP_BTN_W + 2 * P, EXP_BTN_H + 2 * P, SWP_NOZORDER);
-        }
-
-        // Section 2: TOOLS AND PROGRAMS (2 columns × 3 rows)
-        //   col A: Edit TXT (0), Edit Sprite (1), Edit JSON (2)
-        //   col B: Edit Particles (5), Edit Textures (4), Edit Models (3)
-        int colAX = sec2X;
-        int colBX = sec2X + EXP_BTN_W + colGap;
-        int colAOrder[3] = { 0, 1, 2 };
-        int colBOrder[3] = { 5, 4, 3 };
-        for (int r = 0; r < 3; ++r) {
-            int ry = firstRowY + r * (rowH + rowGap);
-            if (g_hwBottomTools[colAOrder[r]])
-                SPosL(g_hwBottomTools[colAOrder[r]], nullptr,
-                             colAX - P, ry - P,
-                             EXP_BTN_W + 2 * P, EXP_BTN_H + 2 * P, SWP_NOZORDER);
-            if (g_hwBottomTools[colBOrder[r]])
-                SPosL(g_hwBottomTools[colBOrder[r]], nullptr,
-                             colBX - P, ry - P,
-                             EXP_BTN_W + 2 * P, EXP_BTN_H + 2 * P, SWP_NOZORDER);
-        }
-
-        // Section 3: DOWNLOADS (3 stacked, single column — centered in column)
-        for (int i = 0; i < 3; ++i) {
-            if (!g_hwBottomDls[i]) continue;
-            int ry = firstRowY + i * (rowH + rowGap);
-            SPosL(g_hwBottomDls[i], nullptr,
-                         dlBtnX - P, ry - P,
-                         EXP_BTN_W + 2 * P, EXP_BTN_H + 2 * P, SWP_NOZORDER);
+        for (int i = 0; i < nBtn; ++i) {
+            if (!g_hwExpandSections[i]) continue;
+            int bx = startX + i * (btnW + gap);
+            SPosL(g_hwExpandSections[i], nullptr,
+                         bx - P, rowY - P,
+                         btnW + 2 * P, btnH + 2 * P, SWP_NOZORDER);
         }
     }
+    // (end expand-panel layout)
 
     // NOTE: Layout() only positions children — it does NOT invalidate.
     // Callers invalidate the precise region they changed (see WM_SIZE,

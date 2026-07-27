@@ -34,7 +34,51 @@ Gdiplus::Bitmap* AssetImage(const wchar_t* name) {
     return b;
 }
 
+// Fast-blit cache for OPAQUE textures. Assets load as 32bppARGB — 32bpp
+// WITH a live alpha channel — so every DrawImage of them takes GDI+'s
+// per-pixel alpha-composite path ON THE CPU (the destination is a memory
+// DC, not a GPU surface). For a 1.5M-pixel stone texture that's ~130 ms
+// PER DRAW, which is the whole expand-toggle stall.
+//
+// Backgrounds and frame textures are fully opaque, so the alpha channel
+// buys nothing. Cloning them to 24bpp RGB removes the channel entirely,
+// which turns the draw into a straight copy (no blend) — the difference
+// between ~130 ms and single-digit ms per blit.
+//
+// ONLY use this for assets that are actually opaque. Anything with real
+// transparency (filigree with see-through gaps, the logo, gem ornaments)
+// must keep its alpha and go through the normal AssetImage path.
+static std::map<wstring, Gdiplus::Bitmap*> g_fastCache;
+
+Gdiplus::Bitmap* AssetImageFast(const wchar_t* name) {
+    auto it = g_fastCache.find(name);
+    if (it != g_fastCache.end()) return it->second;
+
+    Gdiplus::Bitmap* src = AssetImage(name);
+    Gdiplus::Bitmap* fast = nullptr;
+    if (src) {
+        UINT w = src->GetWidth(), h = src->GetHeight();
+        // 24bpp RGB: opaque, no alpha channel → blit is a copy, not a
+        // composite.
+        fast = src->Clone(0, 0, (INT)w, (INT)h, PixelFormat24bppRGB);
+        if (fast && fast->GetLastStatus() != Ok) { delete fast; fast = nullptr; }
+    }
+    g_fastCache[name] = fast ? fast : src;   // fall back to original
+    return g_fastCache[name];
+}
+
 void DestroyAssetCache() {
+    // Free fast-clones first. Some entries may alias an original (clone
+    // failed → we stored the source), so only delete clones that aren't
+    // also in g_assetCache.
+    for (auto& kv : g_fastCache) {
+        bool aliasesOriginal = false;
+        for (auto& ov : g_assetCache) {
+            if (ov.second == kv.second) { aliasesOriginal = true; break; }
+        }
+        if (!aliasesOriginal) delete kv.second;
+    }
+    g_fastCache.clear();
     for (auto& kv : g_assetCache) delete kv.second;
     g_assetCache.clear();
 }

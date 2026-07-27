@@ -93,6 +93,8 @@
 #include "mod_list.h"
 #include "plugin_manager.h"
 #include "loader_options_modal.h"   // ShowBasicOptionsModal — Phase 3 preview trigger
+#include "section_modal.h"          // ShowSectionModal — expand-panel sections
+#include "help_modal.h"             // ShowHelpModal — FAQ reader from Help button
 #include "about_modal.h"            // ShowAboutModal
 #include "d2rloader_update.h"       // KickoffD2RLoaderUpdateCheck, g_d2rloaderUpdateAvailable
 #include "plugin_config.h"     // v1.3: per-mod plugin manifest + globals-disable sweep
@@ -464,9 +466,11 @@ int         g_tbPressed  = -1;
 
 
 
-HWND        g_hwBottomTools[6]   = {};      // 6 tool launchers
-HWND        g_hwBottomRefs[3]    = {};      // 3 references
-HWND        g_hwBottomDls[3]     = {};      // 3 download links
+// Expand panel: four section buttons (References / Tools / Downloads /
+// Tutorials). Each opens a modal listing that section's items; the label
+// on the button IS the section title. Replaces the former 12 individual
+// launch/link buttons across three uneven sections.
+HWND        g_hwExpandSections[4] = {};
 
 static bool        g_modsDirty    = false;       // watcher saw changes; manual refresh pending
 
@@ -890,16 +894,15 @@ static MenuRenderCtx g_menuCtx;
 // UI scale presets for the toolbar Scale cycling button. The percentage
 // label is what the on-screen button shows; the multiplier is what gets
 // stored in LauncherCfg::uiScale. Final g_scale = multiplier * g_dpiScale.
-// The active preset SET is DPI-dependent (see ActiveScalePresets below):
-// at 150% Windows scaling only the smaller three make sense (anything
-// above 100% would push the launcher past most monitors); at 100% the
-// larger three give the user room to scale up.
-
-// Return the indices into g_scalePresets[] that are active under the
-// current g_dpiScale. The boundary is 1.25 — anything at-or-above
-// returns the {75/85/100} subset (typical "150%" Windows scaling),
-// anything below returns the {100/115/127} subset (typical "100%"
-// scaling on a high-pixel-density display).
+// The active preset SET is DPI-dependent (see ActiveScalePresets):
+// higher Windows scaling leaves less room, so the offered multipliers
+// step down to compensate. Three bands:
+//     >= 150% DPI  ->  75 /  85 / 100
+//     >= 125% DPI  ->  85 / 100 / 115
+//     below        -> 100 / 115 / 127
+// Whichever band applies, ApplyScaleChange additionally clamps to the
+// largest preset that actually fits the monitor's work area — the band
+// is chosen by DPI alone and doesn't know the screen's resolution.
 
 // Return the slider state (0/1/2) for the current cfg.uiScale. Used
 // both to pick which btn_toggle*.png to render and as the starting
@@ -1122,9 +1125,82 @@ static void DestroyGdipFonts() {
 // the window so the new physical pixel dimensions match the new
 // scale, then let WM_SIZE→Layout reposition all children. Called
 // from the scale dropdown's setter in WM_LBUTTONDOWN.
+// ── Scale fit guard ──────────────────────────────────────────────────
+//
+// ActiveScalePresets offers three presets per DPI band, but not all of
+// them necessarily FIT the user's monitor. On 1080p at 100% DPI the low-
+// DPI band is 100/115/127, yet only 100% fits a 1920x1032 work area:
+//
+//     100%  1536x1024   fits (8px vertical headroom)
+//     115%  1766x1177   145px too tall
+//     127%  1958x1305   38px too wide, 273px too tall
+//
+// At 127% the bottom 273px is off-screen — and the Scale control lives
+// down there, so a user who selects it can no longer reach the control
+// to undo it, and the choice persists across restarts. This returns the
+// largest active preset that actually fits, so we can clamp both at
+// startup (rescuing anyone already stuck) and on every scale change
+// (so it can't happen again).
+//
+// Falls back to the smallest active preset if nothing fits — better an
+// oversized window than a zero-size one.
+static double LargestFittingUserScale(int workW, int workH) {
+    int a, b, c;
+    ActiveScalePresets(a, b, c);
+    const int largestFirst[3] = { c, b, a };
+    for (int idx : largestFirst) {
+        double mul = g_scalePresets[idx].mul;
+        int w = (int)(LO::WIN_W * mul * g_dpiScale + 0.5);
+        int h = (int)(LO::WIN_H * mul * g_dpiScale + 0.5);
+        if (w <= workW && h <= workH) return mul;
+    }
+    return g_scalePresets[a].mul;
+}
+
+// Work area (screen minus taskbar) of the monitor the window is on, or
+// of the primary monitor when the window doesn't exist yet.
+static void GetWorkAreaFor(HWND hw, int& outW, int& outH) {
+    RECT wa = {};
+    if (hw) {
+        HMONITOR mon = MonitorFromWindow(hw, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfoW(mon, &mi)) wa = mi.rcWork;
+    }
+    if (wa.right <= wa.left || wa.bottom <= wa.top) {
+        if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0)) {
+            wa.left = wa.top = 0;
+            wa.right  = GetSystemMetrics(SM_CXSCREEN);
+            wa.bottom = GetSystemMetrics(SM_CYSCREEN);
+        }
+    }
+    outW = wa.right  - wa.left;
+    outH = wa.bottom - wa.top;
+}
+
 static void ApplyScaleChange(double newUserScale) {
     if (newUserScale <= 0.0) return;
     if (newUserScale == g_userScale) return;     // no-op
+
+    // 0. Clamp to what actually fits this monitor. Presets are chosen by
+    //    DPI band alone, which on a small screen can offer a scale whose
+    //    window overflows the work area — and since the Scale control sits
+    //    near the bottom of the window, overflowing vertically puts the
+    //    only means of undoing it out of reach. Stepping down to the
+    //    largest preset that fits keeps the UI reachable; the control's
+    //    label updates to the applied value, so it's visible what happened.
+    {
+        int workW = 0, workH = 0;
+        GetWorkAreaFor(g_hwMain, workW, workH);
+        // Refresh headroom first — the window may have been dragged to a
+        // different monitor since the last change, which can shift the
+        // whole band.
+        UpdateScreenHeadroom(workW, workH);
+        int wantW = (int)(LO::WIN_W * newUserScale * g_dpiScale + 0.5);
+        int wantH = (int)(LO::WIN_H * newUserScale * g_dpiScale + 0.5);
+        if (wantW > workW || wantH > workH) {
+            newUserScale = LargestFittingUserScale(workW, workH);
+        }
+    }
 
     // 1. Persist the new choice.
     g_cfg.uiScale = newUserScale;
@@ -1515,15 +1591,25 @@ static int TBHitTest(HWND hw, int x, int y) {
     return -1;
 }
 
-// The drag region: the top filigree band of frame_main.png, minus the
-// two buttons. We return HTCAPTION over this band so Windows handles the
-// actual drag (including snap-to-edge). Anywhere else returns HTCLIENT.
+// The drag region: the top filigree band of frame_main.png plus a short
+// extension below it, minus the two buttons. We return HTCAPTION over
+// this band so Windows handles the actual drag (including snap-to-edge).
+// Anywhere else returns HTCLIENT.
 //
-// The band height matches the frame's top inset (measured from the asset)
-// so dragging only works where the filigree actually is.
+// The base height is the frame's top inset (measured from the asset).
+// DRAG_BAND_EXTRA reaches a little further down because the filigree
+// alone is a thin target to grab — the extension covers the dead space
+// just under it (the top few px of the logo art, which isn't clickable)
+// without reaching the version label or any other painted hit target.
+//
+// Logical pixels: the hit-test converts to logical via U() before calling
+// here, and MeasureFrameInset reports asset-native pixels, so this scales
+// with DPI automatically.
+constexpr int DRAG_BAND_EXTRA = 20;
+
 static bool TBPointInDragBand(HWND hw, int x, int y) {
     FrameInset fi = MeasureFrameInset(L"frame_main.png");
-    if (y < 0 || y >= fi.top) return false;
+    if (y < 0 || y >= fi.top + DRAG_BAND_EXTRA) return false;
     // Exclude the button hit-rects (with a small pad around each)
     for (int i = 0; i < 2; ++i) {
         RECT r = TBButtonRect(hw, i);
@@ -1819,6 +1905,7 @@ bool PromptForD2RPath(HWND parent) {
     return true;
 }
 
+
 static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
 
@@ -2075,8 +2162,7 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         else if (id == IDC_NAV_HELP) {
-            wstring p = AppDir() + L"\\FAQ.txt";
-            ShellExecute(hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            ShowHelpModal(hw);
             return 0;
         }
         else if (id == IDC_NAV_ABOUT) {
@@ -2278,13 +2364,18 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                 SetWindowText(g_hwExpandToggle, g_bottomExpanded ? L"\u25B2" : L"\u25BC");
             // Show/hide the bottom-panel buttons en masse
             int sw = g_bottomExpanded ? SW_SHOW : SW_HIDE;
-            for (HWND h : g_hwBottomTools) if (h) ShowWindow(h, sw);
-            for (HWND h : g_hwBottomRefs)  if (h) ShowWindow(h, sw);
-            for (HWND h : g_hwBottomDls)   if (h) ShowWindow(h, sw);
+            for (HWND h : g_hwExpandSections) if (h) ShowWindow(h, sw);
             RepositionForExpansion();        // resize → WM_SIZE → Layout
             // One clean invalidate. Painting is double-buffered and the
             // window class no longer has CS_*REDRAW, so this repaints to
             // the back buffer and blits once — no flicker.
+            //
+            // Do NOT "optimize" this into WM_SETREDRAW batching or a
+            // RedrawWindow(RDW_ALLCHILDREN | RDW_UPDATENOW): that forces
+            // every child to repaint synchronously and outside the normal
+            // parent-then-child order, which breaks the controls that
+            // composite against the parent's painted background (the mod
+            // list backdrop visibly shifts). Tried in v1.4.2, reverted.
             InvalidateRect(hw, nullptr, FALSE);
             return 0;
         }
@@ -2306,61 +2397,93 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
 
+        // ── Expand panel: section buttons ────────────────────────────────
+        // Each opens the parameterised section modal with that section's
+        // item list. The item actions (open URL / launch tool) reuse the
+        // same targets the old individual bottom-panel buttons used.
+        else if (id >= IDC_SECTION_FIRST && id < IDC_SECTION_FIRST + 4) {
+            int section = id - IDC_SECTION_FIRST;   // 0=Refs 1=Tools 2=DLs 3=Tutorials
+
+            // REFERENCES — community resource links.
+            static const SectionItem kRefs[] = {
+                { L"File Guides",  SectionActionKind::OpenUrl,
+                  L"https://eezstreet.github.io/d2rdoc/index.html",
+                  nullptr, nullptr, nullptr },
+                { L"Phrozen Keep", SectionActionKind::OpenUrl,
+                  L"https://d2mods.info/home.php",
+                  nullptr, nullptr, nullptr },
+                { L"Amazon Basin", SectionActionKind::OpenUrl,
+                  L"https://www.theamazonbasin.com/wiki/index.php/Diablo_II",
+                  nullptr, nullptr, nullptr },
+                { L"Paul Siramy Website", SectionActionKind::OpenUrl,
+                  L"http://paul.siramy.free.fr/",
+                  nullptr, nullptr, nullptr },
+            };
+            // TOOLS — resolve + launch external editors.
+            static const SectionItem kTools[] = {
+                { L"Edit TXT Files",    SectionActionKind::LaunchTool, nullptr,
+                  &g_cfg.toolExcel,     L"AFJ Sheet Editor Pro.exe", L"TXT/Excel editor" },
+                { L"Edit Sprite Files", SectionActionKind::LaunchTool, nullptr,
+                  &g_cfg.toolSprite,    L"Eez's Sprite Editor.exe",  L"Sprite editor" },
+                { L"Edit JSON Files",   SectionActionKind::LaunchTool, nullptr,
+                  &g_cfg.toolStrings,   L"Code.exe",                 L"JSON/text editor" },
+                { L"Edit Models",       SectionActionKind::LaunchTool, nullptr,
+                  &g_cfg.toolModels,    L"Blender.exe",              L"Models editor" },
+                { L"Edit Textures",     SectionActionKind::LaunchTool, nullptr,
+                  &g_cfg.toolTextures,  L"paint.net.exe",            L"Textures editor" },
+                { L"Edit Particles",    SectionActionKind::LaunchTool, nullptr,
+                  &g_cfg.toolParticles, L"Particles.exe",            L"Particles editor" },
+            };
+            // DOWNLOADS — external download pages.
+            static const SectionItem kDls[] = {
+                { L"Text Editor",       SectionActionKind::OpenUrl,
+                  L"https://www.afjsoftware.com/", nullptr, nullptr, nullptr },
+                { L"Sprite Editor",     SectionActionKind::OpenUrl,
+                  L"https://d2mods.info/eezstreams/", nullptr, nullptr, nullptr },
+                { L"Visual Basic Code", SectionActionKind::OpenUrl,
+                  L"https://code.visualstudio.com/", nullptr, nullptr, nullptr },
+            };
+            // TUTORIALS — guide links (more to come). YouTube URLs are
+            // stripped of tracking/timestamp tails (&pp=, &t=) to bare
+            // watch?v= links.
+            static const SectionItem kTuts[] = {
+                { L"Monsters & Objects (DS1)",  SectionActionKind::OpenUrl,
+                  L"http://paul.siramy.free.fr/_divers2/tut_any_units_ds1/#super",
+                  nullptr, nullptr, nullptr },
+                { L"New Levels",                SectionActionKind::OpenUrl,
+                  L"https://www.youtube.com/watch?v=Xv81ZXPUNVQ",
+                  nullptr, nullptr, nullptr },
+                { L"Larger Stash",              SectionActionKind::OpenUrl,
+                  L"https://www.youtube.com/watch?v=rAsr9Zvmn_Q",
+                  nullptr, nullptr, nullptr },
+                { L"New Runewords",             SectionActionKind::OpenUrl,
+                  L"https://www.youtube.com/watch?v=brOSBpiwejA",
+                  nullptr, nullptr, nullptr },
+                { L"New Items & Sets",          SectionActionKind::OpenUrl,
+                  L"https://www.youtube.com/watch?v=Gtq-AuOMFBc",
+                  nullptr, nullptr, nullptr },
+                { L"New Superuniques",          SectionActionKind::OpenUrl,
+                  L"https://www.youtube.com/watch?v=lU6_6uGFyII",
+                  nullptr, nullptr, nullptr },
+                { L"Beginner's Guide",          SectionActionKind::OpenUrl,
+                  L"https://www.youtube.com/watch?v=RMquP82QHGw",
+                  nullptr, nullptr, nullptr },
+            };
+
+            switch (section) {
+            case 0: ShowSectionModal(hw, L"References", kRefs,
+                        (int)(sizeof(kRefs)/sizeof(kRefs[0]))); break;
+            case 1: ShowSectionModal(hw, L"Tools", kTools,
+                        (int)(sizeof(kTools)/sizeof(kTools[0]))); break;
+            case 2: ShowSectionModal(hw, L"Downloads", kDls,
+                        (int)(sizeof(kDls)/sizeof(kDls[0]))); break;
+            case 3: ShowSectionModal(hw, L"Tutorials", kTuts,
+                        (int)(sizeof(kTuts)/sizeof(kTuts[0]))); break;
+            }
+            return 0;
+        }
+
         // ── Bottom panel: tool launchers ─────────────────────────────────
-        else if (id >= IDC_TOOL_FIRST && id < IDC_TOOL_FIRST + 6) {
-            int slot = id - IDC_TOOL_FIRST;
-            wstring* paths[6] = {
-                &g_cfg.toolExcel,     // "Edit TXT Files"
-                &g_cfg.toolSprite,    // "Edit Sprite Files"
-                &g_cfg.toolStrings,   // "Edit JSON Files"
-                &g_cfg.toolModels,
-                &g_cfg.toolTextures,
-                &g_cfg.toolParticles,
-            };
-            const wchar_t* hintExe[6] = {
-                L"AFJ Sheet Editor Pro.exe",
-                L"Eez's Sprite Editor.exe",
-                L"Code.exe",                 // VS Code
-                L"Blender.exe",
-                L"paint.net.exe",
-                L"Particles.exe",
-            };
-            const wchar_t* friendly[6] = {
-                L"TXT/Excel editor",
-                L"Sprite editor",
-                L"JSON/text editor",
-                L"Models editor",
-                L"Textures editor",
-                L"Particles editor",
-            };
-            LaunchTool(hw, *paths[slot], hintExe[slot], friendly[slot]);
-            return 0;
-        }
-
-        // ── Bottom panel: references (open URLs) ─────────────────────────
-        else if (id >= IDC_REF_FIRST && id < IDC_REF_FIRST + 3) {
-            int slot = id - IDC_REF_FIRST;
-            const wchar_t* urls[3] = {
-                L"https://eezstreet.github.io/d2rdoc/index.html",                  // Eez's File Guides
-                L"https://d2mods.info/home.php",                                   // Phrozen Keep
-                L"https://www.theamazonbasin.com/wiki/index.php/Diablo_II",        // Amazon Basin
-            };
-            ShellExecute(hw, L"open", urls[slot], nullptr, nullptr, SW_SHOWNORMAL);
-            return 0;
-        }
-
-        // ── Bottom panel: downloads (open URLs) ──────────────────────────
-        else if (id >= IDC_DL_FIRST && id < IDC_DL_FIRST + 3) {
-            int slot = id - IDC_DL_FIRST;
-            const wchar_t* urls[3] = {
-                L"https://www.afjsoftware.com/",
-                L"https://d2mods.info/eezstreams/",
-                L"https://code.visualstudio.com/",
-            };
-            ShellExecute(hw, L"open", urls[slot], nullptr, nullptr, SW_SHOWNORMAL);
-            return 0;
-        }
-
         if (id == IDC_REFRESH_BTN) {
             // Manual mod-list rescan. Clears the "dirty" flag (set by the
             // watcher thread on directory changes) and triggers a fresh
@@ -3876,37 +3999,22 @@ static void CreateControls(HWND hw) {
                                 0, 0, 68, 50, true,
                                 ButtonKind::Arrow);
 
-    // ── Bottom panel placeholder buttons (created hidden) ───────────────
-    // Tools (6), references (3), downloads (3). Wired in Commit 6.
-    const wchar_t* toolLabels[6] = {
-        L"Edit TXT Files",
-        L"Edit Sprite Files",
-        L"Edit JSON Files",
-        L"Edit Models",
-        L"Edit Textures",
-        L"Edit Particles",
+    // ── Expand-panel section buttons (created hidden) ───────────────────
+    // Four buttons across a single row; the label IS the section title.
+    // Each opens a modal listing that section's items. Sized at 320x64
+    // (NexusUpdate style) — see the layout block in layout.cpp for the
+    // even 4-across placement.
+    const wchar_t* sectionLabels[4] = {
+        L"REFERENCES",
+        L"TOOLS",
+        L"DOWNLOADS",
+        L"TUTORIALS",
     };
-    for (int i = 0; i < 6; ++i)
-        g_hwBottomTools[i] = MkStdBtn(hw, toolLabels[i], IDC_TOOL_FIRST + i,
-                                      0, 0, 254, 54, false, ButtonKind::NexusUpdate);
-
-    const wchar_t* refLabels[3] = {
-        L"Eez's File Guides",
-        L"Phrozen Keep",
-        L"Amazon Basin",
-    };
-    for (int i = 0; i < 3; ++i)
-        g_hwBottomRefs[i] = MkStdBtn(hw, refLabels[i], IDC_REF_FIRST + i,
-                                     0, 0, 254, 54, false, ButtonKind::NexusUpdate);
-
-    const wchar_t* dlLabels[3] = {
-        L"AFJ Pro Text Editor",
-        L"Eez's Sprite Editor",
-        L"Visual Basic Code",
-    };
-    for (int i = 0; i < 3; ++i)
-        g_hwBottomDls[i] = MkStdBtn(hw, dlLabels[i], IDC_DL_FIRST + i,
-                                    0, 0, 254, 54, false, ButtonKind::NexusUpdate);
+    for (int i = 0; i < 4; ++i)
+        g_hwExpandSections[i] = MkStdBtn(hw, sectionLabels[i],
+                                         IDC_SECTION_FIRST + i,
+                                         0, 0, 320, 64, false,
+                                         ButtonKind::NexusUpdate);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -3959,6 +4067,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     g_dpiScale  = QuerySystemDpiScale();
 
+    // Headroom must be known before ANY ActiveScalePresets call, since the
+    // band is now chosen from it. Uses the primary monitor here — the
+    // window doesn't exist yet; ApplyScaleChange re-derives it from the
+    // window's actual monitor thereafter.
+    {
+        int workW = 0, workH = 0;
+        GetWorkAreaFor(nullptr, workW, workH);
+        UpdateScreenHeadroom(workW, workH);
+    }
+
     // Between-sessions DPI change → reset uiScale to 1.0. A setting that
     // felt right at 100% scaling can leave the window tiny at 150% (or
     // vice-versa), and the user can't easily reach the toolbar dropdown
@@ -3981,6 +4099,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
             if (d < bestDist) { bestDist = d; best = p; }
         }
         g_cfg.uiScale = best;
+    }
+
+    // Clamp to what fits this monitor. The preset bands are chosen by DPI
+    // alone, so a small screen can be offered — and can have SAVED — a
+    // scale whose window overflows the work area. On 1080p at 100% DPI,
+    // 127% makes the window 273px taller than the work area, which puts
+    // the Scale control itself off-screen: the user can't reach the one
+    // control that would undo it, and the value persists across restarts.
+    // Clamping here rescues anyone already in that state on next launch.
+    {
+        int workW = 0, workH = 0;
+        GetWorkAreaFor(nullptr, workW, workH);   // no window yet → primary
+        int wantW = (int)(LO::WIN_W * g_cfg.uiScale * g_dpiScale + 0.5);
+        int wantH = (int)(LO::WIN_H * g_cfg.uiScale * g_dpiScale + 0.5);
+        if (wantW > workW || wantH > workH) {
+            g_cfg.uiScale = LargestFittingUserScale(workW, workH);
+            SaveCfg();   // persist so the rescue sticks
+        }
     }
 
     g_userScale = g_cfg.uiScale;
@@ -4041,6 +4177,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     if (posX < 0) posX = 0;
 
     g_hwMain = CreateWindowEx(
+        // Two things were tried here to kill the visible "holes fill in one
+        // button at a time" artifact on full repaints. Both were worse than
+        // the artifact; do not re-add either:
+        //
+        //   WS_EX_COMPOSITED      — broke painting outright. The expanded
+        //                           region never painted and child buttons
+        //                           only appeared once hovered.
+        //   dropping CLIPCHILDREN — removed the holes, but then any child
+        //                           repaint drags the whole launcher into a
+        //                           full repaint. Much worse overall.
         WS_EX_APPWINDOW,
         L"Angiris_Main", L"D2RLoader",
         // Custom chrome: no system title bar. The asset's frame_main.png
@@ -4048,6 +4194,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         // top-right filigree and handle dragging via WM_NCHITTEST.
         // WS_MINIMIZEBOX is kept so Windows still does the taskbar
         // minimize animation when our custom button is clicked.
+        //
+        // WS_CLIPCHILDREN keeps each child's rectangle out of the parent's
+        // paint, so a child repainting never costs a parent repaint. That
+        // is the behaviour we want — the cost is that on a FULL repaint the
+        // children fill their holes individually, a frame behind the parent.
         WS_POPUP | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
         posX, posY, winWphys, winHphys,
         nullptr, nullptr, hInst, nullptr);
@@ -4063,6 +4214,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     DragAcceptFiles(g_hwMain, TRUE);
     ShowWindow(g_hwMain, nShow);
     UpdateWindow(g_hwMain);
+
+    // Warm the bottom-panel chrome now that the window is up and painted,
+    // so the user isn't waiting on it mid-click.
+    //
+    // frame_expand.png is referenced ONLY by the expand panel, so without
+    // this both its PNG decode and its filigree measurement land inside
+    // the expand-arrow click handler the first time it's opened —
+    // MeasureFrameInset walks the bitmap pixel by pixel (LockBits + per
+    // row/column alpha density), and that runs on the UI thread with the
+    // click already committed. Both results are cached for the process
+    // lifetime, so paying for them here makes the first expand as fast as
+    // every later one.
+    MeasureFrameInset(L"frame_expand.png");   // also populates the bitmap cache
+    AssetImage(L"frame_expand.png");          // explicit, cheap cache hit
 
     // If CleanupLauncherOldExe couldn't delete Angiris.exe.old up-front
     // (the prior launcher is still releasing its image file), arm the
@@ -4118,6 +4283,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         DispatchMessage(&msg);
     }
 
+    InvalidateStoneCache();   // free the cached backdrop bitmaps too
     DestroyAssetCache();   // free image bitmaps before GDI+ shuts down
     DestroyGdipFonts();
     delete g_userFontFamilyOverride;

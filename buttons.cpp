@@ -17,11 +17,13 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "buttons.h"
+#include <string>         // std::wstring — section-button letter-spacing
 #include "core.h"        // g_hInst, g_bottomExpanded
 #include "scaling.h"     // S, SF, U
 #include "colors.h"      // Tok::Gold, etc.
 #include "assets.h"      // AssetImage, DrawButton9Slice
 #include "fonts.h"       // g_fNav, g_fBtn, etc.
+#include "control_ids.h" // IDC_SECTION_FIRST (section-button letter-spacing)
 #include "layout.h"      // LO::BTN_OVERFLOW_PAD
 #include "paint_helpers.h"  // FillSolid (backdrop fallback), OPDrawBtnFrame (no-asset fallback)
 
@@ -420,7 +422,7 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
 
         // Auto-shrink: if the label is wider than the button's interior,
         // step down to a smaller font. This handles long expansion-panel
-        // labels (e.g. "AFJ Pro Text Editor") in 310px-wide Nav buttons
+        // long labels in 310px-wide Nav buttons
         // without manual per-kind sizing.
         const REAL labelPad = 24.0f;       // horizontal padding inside button
         RectF measureRect;
@@ -438,9 +440,34 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
         labelFont = g_fBtn;
         }
 
+        // Section buttons (IDC_SECTION_FIRST..+3) get extra letter-spacing
+        // so the label reads as a section TITLE rather than an ordinary
+        // button caption — without swapping the font, which stays whatever
+        // the user configured. GDI+ has no tracking property, so we widen
+        // the string by inserting a thin space (U+2009) between characters.
+        // Applied to a local copy; the original `label` is untouched.
+        const wchar_t* drawLabel = label;
+        std::wstring spaced;
+        bool isSection = (d->CtlID >= IDC_SECTION_FIRST &&
+                          d->CtlID <  IDC_SECTION_FIRST + 4);
+        if (isSection && label && *label) {
+            for (const wchar_t* p = label; *p; ++p) {
+                spaced.push_back(*p);
+                if (*(p + 1)) spaced.push_back(L'\x2009');   // thin space
+            }
+            drawLabel = spaced.c_str();
+            // Re-measure the spaced string so auto-shrink still fits it.
+            g.MeasureString(drawLabel, -1, labelFont,
+                        RectF(0, 0, 4096, 4096), &sfC, &measureRect);
+            if (measureRect.Width > (REAL)artW - labelPad && labelFont != g_fBtn) {
+                // Fall back one step rather than let the tracking overflow.
+                if (labelFont == g_fNavSm) labelFont = g_fBtn;
+            }
+        }
+
         // Label renders centered in the art rect (not the full HWND
         // rect), under the same transform as the asset.
-        g.DrawString(label, -1, labelFont,
+        g.DrawString(drawLabel, -1, labelFont,
                  RectF((REAL)artX, (REAL)artY,
                        (REAL)artW, (REAL)artH),
                  &sfC, &lbl);

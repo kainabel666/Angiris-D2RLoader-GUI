@@ -29,7 +29,7 @@ struct LauncherCfg {
     wstring d2rPath;
     wstring lastMod;
     wstring toolsDir;       // user's modding tools folder
-    wstring toolExcel;      // resolved AFJ Sheet Editor Pro.exe
+    wstring toolExcel;      // resolved text/sheet editor exe
     wstring toolStrings;    // resolved Code.exe
     wstring toolSprite;     // resolved D2RModding-SpriteEdit-2.0.exe
     wstring toolModels;     // resolved models editor (.exe or shortcut)

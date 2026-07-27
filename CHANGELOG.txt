@@ -2,6 +2,157 @@ ANGIRIS LAUNCHER — CHANGELOG
 ═══════════════════════════════════════════════════════════════════════
 
 
+V1.5
+─────────────────────────────────────────────────────────────────────
+
+
+CHANGED: Modding panel redesigned around four sections
+
+  The bottom panel — opened by the arrow under the center column — is no
+  longer a single dense grid of a dozen buttons. It's now four clearly
+  labelled sections in one row:
+
+      REFERENCES   TOOLS   DOWNLOADS   TUTORIALS
+
+  Clicking a section opens a small window listing that section's items.
+  Short lists show as a single column; longer ones split into two. This
+  keeps the panel itself compact — it no longer runs off the bottom of
+  smaller screens the way the old tall grid did — while making room to
+  add far more per section than the old layout could hold.
+
+  REFERENCES and DOWNLOADS carry the same links as before; TOOLS launches
+  the same local editors. TUTORIALS is new — a growing set of guide links
+  (level creation, runewords, items and sets, and more).
+
+
+NEW: Help opens an in-app FAQ reader
+
+  The Help button used to open FAQ.txt in Notepad. It now opens a
+  scrollable reader inside the launcher, styled to match the rest of the
+  UI, with a "Need More Help?" prompt and a Discord link to the community
+  server at the bottom.
+
+
+FIXED: Esc in the About window triggered the download
+
+  Pressing Esc to dismiss the About window could instead start the
+  D2RLoader download, because the window's Esc handling collided with the
+  Download button internally. Esc (and the About/Help/section windows
+  generally) now closes cleanly. In the About window, if you're reading
+  README or FAQ, Esc backs out to the main About view first.
+
+
+FIXED: Launcher could start too large to use, with no way to recover
+
+  On a 1080p display at 100% Windows scaling, the launcher offered UI
+  scale options of 100% / 115% / 127% — but only 100% actually fits a
+  1920x1080 screen. At 127% the window is 1958x1305, which is 273px
+  taller than the usable desktop area.
+
+  Because the Scale control sits near the bottom of the window, choosing
+  one of those options put the control itself off-screen. The setting is
+  saved, so restarting didn't help: the one control that could undo it
+  was permanently out of reach.
+
+  The scale options are now checked against your actual monitor, and any
+  choice whose window wouldn't fit is stepped down to the largest one
+  that does. This applies both when you change the setting and at
+  startup — so anyone already stuck gets a usable window back on the
+  next launch, without having to edit or delete any files.
+
+
+CHANGED: UI scale options now account for screen size, not just DPI
+
+  Previously the three offered scale options were chosen from your
+  Windows DPI setting alone. That ignores resolution, and the two are
+  not interchangeable: 1080p at 150% and 4K at 150% report the same DPI
+  but have very different amounts of usable space.
+
+  Your DPI setting still decides which options you're offered — it's
+  your stated preference for how large things should be, and a 4K
+  display always gets exactly what it asks for. Resolution now acts only
+  as a limit, shifting the options down when the screen physically can't
+  display them.
+
+  Two smaller options (50% and 65%) were added for the cases that had
+  nothing workable before — notably 1080p at 150%, where even the old
+  smallest option of 75% overflowed the screen.
+
+  What you'll be offered:
+
+                  DPI 100%          DPI 125%          DPI 150%
+      1080p       75/85/100         50/65/75          50/65/75
+      1440p       100/115/127       75/85/100         65/75/85
+      4K          100/115/127       85/100/115        75/85/100
+
+  If you had previously set a scale that no longer appears in your list,
+  it will be adjusted to the nearest option that fits.
+
+
+FIXED: Long delay and visible "assembling" when opening the modding panel
+
+  Clicking the expand arrow took roughly a second, and the panel visibly
+  filled in piece by piece rather than appearing at once.
+
+  The cause was in how the window background was drawn. Every repaint
+  redrew the stone texture and frame artwork from scratch — around a
+  dozen large image operations, each one resampled because the UI is
+  drawn at a scale factor. Measured, a single full repaint cost roughly
+  830ms.
+
+  The static parts of the window (stone background, frame, panel borders,
+  ornaments) are now composed once into an off-screen image at the exact
+  size needed, and each repaint simply copies that image into place. The
+  same work now costs about 1ms.
+
+  This affects every full repaint, not just the modding panel — the
+  launcher should feel more responsive when switching back to it from
+  another window, restoring it from the taskbar, or changing settings.
+
+  The first time you open (and the first time you close) the panel in a
+  session still does the one-time composition for that state; every
+  toggle after is immediate.
+
+
+CHANGED: Larger window drag area
+
+  The draggable strip along the top of the window extends 20px further
+  down, making the window easier to grab. The title-bar buttons are
+  unaffected.
+
+
+CHANGED: Modding panel buttons resized
+
+  The buttons in the References / Tools and Programs / Downloads sections
+  are slightly smaller (252x52, from 280x58) with more space between
+  them.
+
+  They previously clipped one another. Each button reserves an invisible
+  margin so its hover animation has room to draw, and that margin was
+  sized for the much larger navigation buttons — about four times more
+  than these needed. The surplus made neighbouring buttons overlap. The
+  margin is now sized for these buttons specifically, and the row spacing
+  matched to it.
+
+
+CHANGED: Tool and reference names no longer vendor-branded
+
+  "AFJ Pro Text Editor" is now "Text Editor", "Eez's Sprite Editor" is
+  now "Sprite Editor", and "Eez's File Guides" is now "File Guides".
+  The links and the programs they launch are unchanged.
+
+
+FIXED: Minimize and close buttons could become invisible
+
+  If btn_minimize.png or btn_close.png was missing or corrupt, the two
+  title-bar buttons drew nothing at all — but stayed clickable, since
+  the click detection is based on position rather than artwork. That
+  left two invisible working buttons in the corner of the window.
+
+  Both now fall back to a drawn control (a dash and a cross) that follows
+  your chosen colour, so the window controls are always visible.
+
+
 V1.4.1
 ─────────────────────────────────────────────────────────────────────
 

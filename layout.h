@@ -140,7 +140,7 @@ namespace LO {
     // target of 1536×1324 represents collapsed + EXPAND_H combined.
     constexpr int WIN_W       = 1536;
     constexpr int WIN_H       = 1024;
-    constexpr int EXPAND_H    =  300;   // bottom expansion panel extra height
+    constexpr int EXPAND_H    =  159;   // bottom expansion panel extra height (matches bg/frame_expand.png)
 
     // Body column widths (new layout). LEFT_RAIL_W is sized to hold the
     // 322px logo image with margin AND the 310px nav button assets; the
@@ -192,34 +192,27 @@ namespace LO {
     constexpr int CORNER_ACCENT_INSET_X = 0;
     constexpr int CORNER_ACCENT_INSET_Y = 0;
 
-    // Bottom expand-panel vertical dividers (left/right_expand_divider.png,
-    // each 27×248 — a mirrored pair). Centered in the two gaps that flank the
-    // central Tools column, top-aligned to the section content. TOP_PAD nudges
-    // them up/down from the header line (negative = up; current −6 tucks the
-    // top under the panel filigree); X_NUDGE shifts both dividers laterally
-    // to line up with verticals elsewhere on the main window; FALLBACK_H is
-    // the height of the programmatic rule when the PNG is missing.
-    constexpr int EXP_DIVIDER_TOP_PAD    = -6;
-    constexpr int EXP_DIVIDER_X_NUDGE    =  0;
-    constexpr int EXP_DIVIDER_FALLBACK_H = 248;
+    // Expand-panel SECTION buttons (v1.5 restructure): four evenly-spaced
+    // buttons across one row, each opening a modal. The label is the section
+    // title. 320x64 in NexusUpdate style — wider and taller than the old
+    // per-item buttons since they're headers now, not list entries. The
+    // 4-across layout (layout.cpp) distributes width as 5 equal gaps.
+    constexpr int EXP_SECTION_W = 320;
+    constexpr int EXP_SECTION_H = 64;
 
-    // Bottom expand-panel button grid (shared by Layout positioning and
-    // PaintBottomPanel chrome). EXP_BTN_W is narrowed from the 310px nav
-    // width so each button sits inside its section with padding instead of
-    // bleeding into the dividers. EXP_SEC_GAP is the wide gap between
-    // sections that holds a divider — sized so the gap between adjacent
-    // button HWNDs (EXP_SEC_GAP − 2·BTN_OVERFLOW_PAD) clears the 27px divider
-    // with headroom on both sides. EXP_COL_GAP is the tight internal gap
-    // between the two Tools columns (no divider there).
-    constexpr int EXP_BTN_W   = 280;
-    constexpr int EXP_BTN_H   =  58;
-    constexpr int EXP_SEC_GAP =  64;
-    constexpr int EXP_COL_GAP =  24;
-    // Section-title band height and inter-row gap. Tightened (from 44/12) so
-    // the three button rows clear the panel's bottom filigree, and matched to
-    // the smaller g_fExpHdr title font.
-    constexpr int EXP_HDR_H   =  30;
-    constexpr int EXP_ROW_GAP =   8;
+    // Fixed horizontal inset for the expand-panel content. MeasureFrameInset
+    // can't read frame_expand's thin side filigree (it never crosses the
+    // opaque-column threshold and returns ~half the width), so the 4-across
+    // row uses this constant instead of a measured value. ~26px filigree +
+    // a little breathing room.
+    constexpr int EXP_SIDE_INSET = 34;
+
+    // Hover-overflow pad for the expand-panel buttons ONLY. The global
+    // BTN_OVERFLOW_PAD (12) is sized for the largest controls in the app —
+    // the 310px nav buttons at a 1.06 hover scale. These are NexusUpdate at
+    // 1.05, so they grow only a few px; 8px covers it with margin. Each
+    // HWND is enlarged by 2*P, so an oversized pad makes neighbours overlap.
+    constexpr int EXP_OVERFLOW_PAD = 8;
 }
 
 // ═══════════════════════════════════════════════════════════════════════

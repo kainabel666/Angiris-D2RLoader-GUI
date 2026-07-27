@@ -27,3 +27,10 @@
 //
 // Called from MainProc's WM_PAINT after PreservedRenderState setup.
 void PaintBody(HDC hdc, int W, int H);
+
+// Drop the cached static-stone backdrop bitmaps, forcing a rebuild on the
+// next paint. The cache keys itself on window size and UI scale, so those
+// changes are handled automatically — call this only when the underlying
+// ASSETS change (e.g. the asset cache is rebuilt), which the size/scale
+// check can't detect.
+void InvalidateStoneCache();

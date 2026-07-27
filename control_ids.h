@@ -57,11 +57,16 @@ enum {
     // Bottom expansion panel toggle (arrow button)
     IDC_EXPAND_TOGGLE  = 150,
 
-    // Bottom panel: 6 tool launchers, 3 references, 3 download URLs.
-    // Wired into the existing LaunchTool flow.
-    IDC_TOOL_FIRST     = 200,    // 200..205  (6 tools)
-    IDC_REF_FIRST      = 210,    // 210..212  (3 references)
-    IDC_DL_FIRST       = 220,    // 220..222  (3 download links)
+    // Expand-panel SECTION buttons — four buttons (References / Tools /
+    // Downloads / Tutorials) that each open a section modal. The modal
+    // uses its own local button IDs, so these per-item ranges are no
+    // longer wired to live controls; kept for reference / possible reuse.
+    IDC_SECTION_FIRST  = 190,    // 190..193  (4 section buttons)
+
+    IDC_TOOL_FIRST     = 200,    // (unused since v1.5 modal restructure)
+    IDC_REF_FIRST      = 210,    // (unused since v1.5 modal restructure)
+    IDC_DL_FIRST       = 220,    // (unused since v1.5 modal restructure)
+    IDC_TUT_FIRST      = 230,    // (unused since v1.5 modal restructure)
 
     // Mod list right-click context menu commands. These aren't real
     // child-control IDs — they're TrackPopupMenu command IDs that come

@@ -135,25 +135,40 @@ struct MemDC {
 // ── Scale preset machinery ───────────────────────────────────────────
 //
 // The toolbar Scale button is a 3-stop cycling slider. The active
-// three stops are picked from this five-entry table depending on the
-// monitor's DPI — at 150% Windows scaling, only the smaller three
-// values keep the launcher on-screen; at 100% scaling, the larger
-// three give the user room to scale up.
+// three stops are picked from this seven-entry table based on the
+// monitor's HEADROOM (resolution and DPI together) — see
+// ActiveScalePresets. A small screen at high DPI needs the low stops to
+// stay on-screen at all; a 4K display has room for the high ones.
 
 struct ScalePreset { const wchar_t* label; double mul; };
 
+// Number of entries in g_scalePresets. Declared BEFORE the array so it
+// can supply the bound — the two previously drifted apart (a [5] extern
+// against a [7] definition) when stops were added.
+constexpr int kNumScalePresets = 7;
+
 // Defined in scaling.cpp. Read-only after init — callers iterate
 // or index into it.
-extern const ScalePreset g_scalePresets[5];
+extern const ScalePreset g_scalePresets[kNumScalePresets];
 
-// Number of entries in g_scalePresets. Provided so callers don't
-// have to do sizeof gymnastics.
-constexpr int kNumScalePresets = 5;
+// Largest userScale whose window still fits the current monitor's work
+// area. Read by ActiveScalePresets to pick a band. 1.0 until
+// UpdateScreenHeadroom has run.
+extern double g_screenHeadroom;
+
+// Recompute g_screenHeadroom for a work area given in PHYSICAL pixels
+// (i.e. MONITORINFO::rcWork). Call at startup once g_dpiScale is known,
+// and again whenever the window may have moved to another monitor.
+void UpdateScreenHeadroom(int workW, int workH);
 
 // Fill (a, b, c) with the three indices into g_scalePresets[] that
-// are active under the current g_dpiScale. The boundary is 1.25 —
-// at-or-above returns {0,1,2} (75/85/100), below returns {2,3,4}
-// (100/115/127).
+// are active. The band comes from DPI — the user's stated size
+// preference — and is shifted DOWN only if the monitor physically
+// can't fit it (see g_screenHeadroom):
+//     >= 150% DPI  ->  75 /  85 / 100
+//     >= 125% DPI  ->  85 / 100 / 115
+//     else         -> 100 / 115 / 127
+// e.g. 1080p @ 150% can't fit even 75%, so its band slides to 50/65/75.
 void ActiveScalePresets(int& a, int& b, int& c);
 
 // Which of the three active stops (0/1/2) matches the current

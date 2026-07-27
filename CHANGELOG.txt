@@ -2,6 +2,44 @@ ANGIRIS LAUNCHER — CHANGELOG
 ═══════════════════════════════════════════════════════════════════════
 
 
+V1.5.1
+─────────────────────────────────────────────────────────────────────
+
+
+NEW: Help and About readers use a themed reading font
+
+  The README and FAQ readers now render in Georgia — a proper reading
+  face — instead of the plain system font, so they look like part of the
+  launcher while staying easy to read in long documents.
+
+  For those who want full theming, user_layout.json has a new
+  reader_use_app_font option (default false). Set it true to render the
+  readers in your chosen display font instead; note that decorative faces
+  like Exocet are harder to read in long passages, which is why it's off
+  by default.
+
+
+FIXED: Help and About windows now follow the UI-scale setting
+
+  The reader text — and the rest of those windows — stayed a fixed size
+  when you changed the UI scale, while the titles grew, so the two looked
+  mismatched. The whole window now scales together with your UI-scale
+  choice.
+
+
+CHANGED: Discord icon in the Help window is easier to see
+
+  On its own and at its smaller size, the Discord icon tended to blend
+  into the stone background. It's now brightened so it stands out clearly.
+
+
+FIXED: Esc no longer opens Discord in the Help window
+
+  Pressing Esc to close the Help window could open the Discord link
+  instead, because Esc was being read as a click on the Discord button.
+  Esc now simply closes the window.
+
+
 V1.5
 ─────────────────────────────────────────────────────────────────────
 

@@ -797,6 +797,10 @@ D2RLoader community server. Close or Esc dismisses it.
   from the hub, Close dismisses the modal. Esc does the same at each
   step. Discord opens the D2RLoader community server in your browser.
 
+  The reader text uses Georgia (a legible reading face) by default. To
+  render it in your chosen display font instead, set reader_use_app_font
+  to true in user_layout.json - see CONFIG FILES below.
+
 
   DOWNLOADING D2RLOADER
   ---------------------

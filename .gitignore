@@ -5,3 +5,4 @@
 launcher_config.json
 plugin_manifest.json
 compile_errors.txt
+*.o

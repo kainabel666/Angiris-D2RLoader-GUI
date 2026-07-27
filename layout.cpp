@@ -171,7 +171,8 @@ void MigrateLayoutFile() {
     // Extend this list as new fields land in future versions.
     struct Field { const wchar_t* key; const wchar_t* def; };
     static const Field kFields[] = {
-        { L"scale_as_dropdown", L"false" },   // v1.4.1
+        { L"scale_as_dropdown",  L"false" },   // v1.4.1
+        { L"reader_use_app_font", L"false" },  // v1.5.1
     };
 
     bool changed = false;
@@ -196,6 +197,7 @@ void LoadLayoutOverrides() {
     g_layout.modRowHeight      = ReadJsonInt (json, L"mod_row_height");
     g_layout.showModdingExpand = ReadJsonBool(json, L"show_modding_expand");
     g_layout.scaleAsDropdown   = ReadJsonBool(json, L"scale_as_dropdown");
+    g_layout.readerUseAppFont  = ReadJsonBool(json, L"reader_use_app_font");
 
     // Nested "version_label" object
     wstring verObj = ExtractNestedObject(json, L"version_label");
@@ -238,6 +240,7 @@ int  LayoutVersionLabelX    (int  d) { return g_layout.versionLabelX    .value_o
 int  LayoutVersionLabelY    (int  d) { return g_layout.versionLabelY    .value_or(d); }
 bool LayoutShowModdingExpand(bool d) { return g_layout.showModdingExpand.value_or(d); }
 bool LayoutScaleAsDropdown  (bool d) { return g_layout.scaleAsDropdown  .value_or(d); }
+bool LayoutReaderUseAppFont (bool d) { return g_layout.readerUseAppFont .value_or(d); }
 
 bool LayoutNavButtonVisible(const wchar_t* id, bool d) {
     auto it = g_layout.navButtons.find(id);

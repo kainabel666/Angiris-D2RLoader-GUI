@@ -3,7 +3,9 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "fonts.h"
-#include "core.h"   // AppDir
+#include "core.h"     // AppDir, g_dpiScale
+#include "config.h"   // g_cfg.fontName (opt-in reader font)
+#include "layout.h"   // LayoutReaderUseAppFont
 
 // ── Storage for the extern declarations in fonts.h ───────────────────
 
@@ -191,12 +193,32 @@ HFONT MakeReaderFont(int pointSize) {
     // EDIT/GDI want a height in logical units; negative = character height
     // (excludes internal leading), which is the usual choice for point sizes.
     int px = (int)(pointSize * 96.0 / 72.0 * g_dpiScale + 0.5);
+
+    // Face selection. Default is Georgia (legible for long documentation).
+    // If the user opted in via user_layout.json (reader_use_app_font: true)
+    // AND has actually chosen a display font, honor that choice instead —
+    // accepting that decorative faces read less comfortably in paragraphs.
+    const wchar_t* face = L"Georgia";
+    if (LayoutReaderUseAppFont(false) && !g_cfg.fontName.empty()) {
+        face = g_cfg.fontName.c_str();
+    }
+
     HFONT hf = CreateFontW(
         -px, 0, 0, 0,
         FW_NORMAL, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, FF_ROMAN | VARIABLE_PITCH,
-        L"Georgia");
+        face);
+    // If the chosen face fails to create, fall back to Georgia, then to the
+    // stock GUI font — the reader must always have a usable font.
+    if (!hf && face != nullptr && lstrcmpW(face, L"Georgia") != 0) {
+        hf = CreateFontW(
+            -px, 0, 0, 0,
+            FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY, FF_ROMAN | VARIABLE_PITCH,
+            L"Georgia");
+    }
     if (!hf) hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     return hf;
 }

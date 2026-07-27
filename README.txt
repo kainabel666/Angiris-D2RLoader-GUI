@@ -1125,6 +1125,13 @@ GLOBAL (next to the launcher exe, under assets\):
                                 a "SCALE" header above the value box (like
                                 the On Launch column). One click to any
                                 scale instead of cycling.
+        reader_use_app_font   - true/false (default false). The README/FAQ
+                                readers in the About and Help windows use a
+                                legible reading font (Georgia) by default.
+                                Set true to render them in your chosen
+                                display font instead - note that decorative
+                                faces (Exocet, Cinzel) are harder to read in
+                                long documents.
         nav_buttons           - per-button overrides keyed by id ("mods",
                                 "logs", "help", "about", "exit"), each
                                 accepting "visible" and "enabled" booleans
@@ -1132,7 +1139,8 @@ GLOBAL (next to the launcher exe, under assets\):
         Example:
             {
                 "scale_as_dropdown": true,
-                "show_modding_expand": true
+                "show_modding_expand": true,
+                "reader_use_app_font": false
             }
 
         This file is PRESERVED across launcher updates (see below), and a

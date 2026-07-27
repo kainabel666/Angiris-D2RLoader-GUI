@@ -73,6 +73,13 @@ struct LayoutOverrides {
     // prefer explicit selection over cycling pick a scale in one click.
     std::optional<bool> scaleAsDropdown;
 
+    // When true, the README/FAQ readers in the About and Help modals use
+    // the user's chosen DISPLAY font instead of the default Georgia reading
+    // face. Off by default: display fonts (Exocet, Cinzel, etc.) are
+    // decorative and read poorly in long documentation, so this is opt-in
+    // for users who prefer full theming over reading comfort.
+    std::optional<bool> readerUseAppFont;
+
     // Per-button overrides keyed by id string ("mods", "logs", "help",
     // "about", "exit"). Missing key = no override for that button;
     // default-constructed NavButtonOverride means the key was present
@@ -109,6 +116,7 @@ int  LayoutVersionLabelX      (int  defaultX);
 int  LayoutVersionLabelY      (int  defaultY);
 bool LayoutShowModdingExpand  (bool defaultVisible);
 bool LayoutScaleAsDropdown    (bool defaultDropdown);
+bool LayoutReaderUseAppFont   (bool defaultUseAppFont);
 
 // Per-button accessors. `id` is the lowercase button id ("mods",
 // "logs", "help", "about", "exit"). Defaults are `visible=true,

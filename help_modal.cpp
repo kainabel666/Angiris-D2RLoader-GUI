@@ -157,18 +157,23 @@ static LRESULT CALLBACK HelpModalProc(HWND hw, UINT msg,
             Gdiplus::Font* promptFont = g_fNavSm ? g_fNavSm : g_fBtn;
             const wchar_t* promptText = L"Need More Help?";
             if (promptFont) {
+                // Measure with the SAME left-aligned, no-wrap format used to
+                // draw, so widths agree. NoWrap guarantees a single line even
+                // if the measured width is a hair short; the +4 cushion keeps
+                // the last glyph off the wrap boundary.
+                StringFormat sfL;
+                sfL.SetAlignment(StringAlignmentNear);
+                sfL.SetLineAlignment(StringAlignmentCenter);
+                sfL.SetFormatFlags(StringFormatFlagsNoWrap);
+
                 RectF meas;
                 g.MeasureString(promptText, -1, promptFont,
-                                RectF(0, 0, 4096, (REAL)promptH), &sfC, &meas);
-                int textW = (int)(meas.Width + 0.5f);
+                                RectF(0, 0, 4096, (REAL)promptH), &sfL, &meas);
+                int textW = (int)(meas.Width + 0.5f) + S(4);
                 int gap   = S(HM_PROMPT_TO_DISC);
                 int rowW  = textW + gap + discSz;
                 int rowX  = (W - rowW) / 2;
 
-                // Text left-aligned within its slot (so it hugs the button).
-                StringFormat sfL;
-                sfL.SetAlignment(StringAlignmentNear);
-                sfL.SetLineAlignment(StringAlignmentCenter);
                 g.DrawString(promptText, -1, promptFont,
                     RectF((REAL)rowX, (REAL)rowTop, (REAL)textW, (REAL)promptH),
                     &sfL, &parch);
@@ -303,10 +308,13 @@ void ShowHelpModal(HWND parent) {
                 StringFormat sf;
                 sf.SetAlignment(StringAlignmentNear);
                 sf.SetLineAlignment(StringAlignmentCenter);
+                sf.SetFormatFlags(StringFormatFlagsNoWrap);
                 RectF meas;
                 mg.MeasureString(L"Need More Help?", -1, pf,
                                  RectF(0, 0, 4096, (REAL)promptH), &sf, &meas);
-                int textW = (int)(meas.Width + 0.5f);
+                // +4 cushion must match the paint side (S(4) there; at this
+                // point physH already includes dpi, so scale 4 the same way).
+                int textW = (int)(meas.Width + 0.5f) + (int)(4 * g_dpiScale);
                 int gap   = (int)(HM_PROMPT_TO_DISC * g_dpiScale);
                 int rowW  = textW + gap + discSz;
                 int rowX  = (physW - rowW) / 2;
@@ -319,6 +327,10 @@ void ShowHelpModal(HWND parent) {
     g_hmDiscord = MkStdBtn(g_hmHwnd, L"X", HM_IDC_DISCORD,
                            discX, discY, discSz, discSz,
                            true, ButtonKind::ModLinkDiscord);
+    // This Discord icon sits alone at reduced size, where it tends to blend
+    // into the stone; give it a backing plate so it stands out. (The About
+    // modal's Discord, among sibling icons, doesn't get one.)
+    if (g_hmDiscord) SetButtonBackingPlate(g_hmDiscord, true);
 
     // Close — centered, bottom.
     int physCloseW = (int)(HM_CLOSE_W * g_dpiScale);

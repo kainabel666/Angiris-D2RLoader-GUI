@@ -76,3 +76,4 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d);
 // the mod-folder watcher reports pending changes. No-op if `hw`
 // isn't a registered owner-draw button.
 void SetButtonDirty(HWND hw, bool dirty);
+void SetButtonBackingPlate(HWND hw, bool on);

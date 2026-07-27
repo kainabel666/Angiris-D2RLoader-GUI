@@ -83,6 +83,7 @@ struct ButtonState {
     bool       hover    = false;     // mouse currently over this button
     bool       tracking = false;     // we've called TrackMouseEvent already
     bool       dirty    = false;     // refresh-style "pending changes" highlight
+    bool       backingPlate = false; // draw a glow plate behind the icon
 };
 static map<HWND, ButtonState> g_btnStates;
 
@@ -301,6 +302,9 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
               Tok::crBgDeep);
     }
 
+    // (Icon brightening for opt-in buttons is applied at the DrawImage
+    //  call below via a ColorMatrix — see st.backingPlate there.)
+
     // ── Asset + label, drawn under a shared state transform ─────────
     // Both the asset image AND its label text scale/offset together,
     // so the button reads as one piece (instead of the art moving
@@ -368,7 +372,34 @@ bool PaintOwnerDrawButton(DRAWITEMSTRUCT* d) {
         } else {
         InterpolationMode prevIM = g.GetInterpolationMode();
         g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
-        g.DrawImage(assetBM, artX, artY, artW, artH);
+        if (st.backingPlate) {
+            // Brighten the icon so it separates from the dark stone. The
+            // reported problem is a VALUE (brightness) gap, not saturation:
+            // the muted bronze icon sits at nearly the same lightness as
+            // the backdrop. This ColorMatrix scales RGB up (>1 on the
+            // diagonal) and adds a flat lift (the last row), pushing the
+            // whole icon lighter while leaving alpha untouched.
+            //
+            // Brightness lift. Stepped down from the 1.5x/0.075 midpoint to
+            // 1.3x diagonal + 0.04 flat lift — enough to separate the icon
+            // from the dark stone while keeping the bronze tone natural.
+            Gdiplus::ColorMatrix cm = {
+                1.3f, 0.0f, 0.0f, 0.0f, 0.0f,
+                0.0f, 1.3f, 0.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.3f, 0.0f, 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+                0.04f,0.04f,0.04f,0.0f, 1.0f
+            };
+            Gdiplus::ImageAttributes ia;
+            ia.SetColorMatrix(&cm, Gdiplus::ColorMatrixFlagsDefault,
+                              Gdiplus::ColorAdjustTypeBitmap);
+            Gdiplus::Rect dst(artX, artY, artW, artH);
+            g.DrawImage(assetBM, dst,
+                        0, 0, (INT)assetBM->GetWidth(), (INT)assetBM->GetHeight(),
+                        UnitPixel, &ia);
+        } else {
+            g.DrawImage(assetBM, artX, artY, artW, artH);
+        }
         g.SetInterpolationMode(prevIM);
         }
         drewAsset = true;
@@ -483,5 +514,16 @@ void SetButtonDirty(HWND hw, bool dirty) {
     if (it == g_btnStates.end()) return;
     if (it->second.dirty == dirty) return;       // no-op if unchanged
     it->second.dirty = dirty;
+    InvalidateRect(hw, nullptr, FALSE);
+}
+
+// Opt a specific button into the icon backing-plate (a soft glow behind
+// the art). Used for the Help modal's isolated Discord icon, which blends
+// into the stone at its reduced size.
+void SetButtonBackingPlate(HWND hw, bool on) {
+    auto it = g_btnStates.find(hw);
+    if (it == g_btnStates.end()) return;
+    if (it->second.backingPlate == on) return;
+    it->second.backingPlate = on;
     InvalidateRect(hw, nullptr, FALSE);
 }

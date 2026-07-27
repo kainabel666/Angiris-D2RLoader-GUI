@@ -255,8 +255,8 @@ void ShowHelpModal(HWND parent) {
         g_hmClassReg = true;
     }
 
-    int physW = (int)(HM_W * g_dpiScale);
-    int physH = (int)(HM_H * g_dpiScale);
+    int physW = (int)(HM_W * g_scale);
+    int physH = (int)(HM_H * g_scale);
 
     RECT pr; GetWindowRect(parent, &pr);
     int x = pr.left + ((pr.right  - pr.left) - physW) / 2;
@@ -273,17 +273,17 @@ void ShowHelpModal(HWND parent) {
     // Layout (bottom-anchored): Close at the bottom; the "Need More Help?"
     // prompt + Discord button share one centered row above it; the reader
     // EDIT fills from the title band down to that row. Compute bottom-up.
-    int closeH   = (int)(HM_CLOSE_H * g_dpiScale);
-    int discSz   = (int)(HM_DISCORD_SZ * g_dpiScale);
-    int promptH  = (int)(HM_PROMPT_H * g_dpiScale);
-    int closeTop = physH - (int)(HM_BOTTOM_PAD * g_dpiScale) - closeH;
-    int rowTop   = closeTop - (int)(HM_ROW_TO_CLOSE * g_dpiScale) - promptH;
+    int closeH   = (int)(HM_CLOSE_H * g_scale);
+    int discSz   = (int)(HM_DISCORD_SZ * g_scale);
+    int promptH  = (int)(HM_PROMPT_H * g_scale);
+    int closeTop = physH - (int)(HM_BOTTOM_PAD * g_scale) - closeH;
+    int rowTop   = closeTop - (int)(HM_ROW_TO_CLOSE * g_scale) - promptH;
 
-    int edX = (int)(HM_READER_PAD * g_dpiScale);
-    int edY = (int)(HM_READER_TOP * g_dpiScale);
+    int edX = (int)(HM_READER_PAD * g_scale);
+    int edY = (int)(HM_READER_TOP * g_scale);
     int edW = physW - 2 * edX;
-    int edH = rowTop - (int)(HM_PROMPT_GAP * g_dpiScale) - edY;
-    if (edH < (int)(80 * g_dpiScale)) edH = (int)(80 * g_dpiScale);
+    int edH = rowTop - (int)(HM_PROMPT_GAP * g_scale) - edY;
+    if (edH < (int)(80 * g_scale)) edH = (int)(80 * g_scale);
 
     g_hmEdit = CreateWindowExW(0, L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
@@ -318,8 +318,8 @@ void ShowHelpModal(HWND parent) {
                                  RectF(0, 0, 4096, (REAL)promptH), &sf, &meas);
                 // +4 cushion must match the paint side (S(4) there; at this
                 // point physH already includes dpi, so scale 4 the same way).
-                int textW = (int)(meas.Width + 0.5f) + (int)(4 * g_dpiScale);
-                int gap   = (int)(HM_PROMPT_TO_DISC * g_dpiScale);
+                int textW = (int)(meas.Width + 0.5f) + (int)(4 * g_scale);
+                int gap   = (int)(HM_PROMPT_TO_DISC * g_scale);
                 int rowW  = textW + gap + discSz;
                 int rowX  = (physW - rowW) / 2;
                 discX = rowX + textW + gap;
@@ -337,7 +337,7 @@ void ShowHelpModal(HWND parent) {
     if (g_hmDiscord) SetButtonBackingPlate(g_hmDiscord, true);
 
     // Close — centered, bottom.
-    int physCloseW = (int)(HM_CLOSE_W * g_dpiScale);
+    int physCloseW = (int)(HM_CLOSE_W * g_scale);
     int closeX = (physW - physCloseW) / 2;
     g_hmClose = MkStdBtn(g_hmHwnd, L"Close", HM_IDC_CLOSE,
                          closeX, closeTop, physCloseW, closeH,

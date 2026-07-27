@@ -545,8 +545,8 @@ void ShowAboutModal(HWND parent) {
     g_abStatus.clear();
 
     RECT pr; GetWindowRect(parent, &pr);
-    int physW = (int)(AB_W * g_dpiScale);
-    int physH = (int)(AB_H * g_dpiScale);
+    int physW = (int)(AB_W * g_scale);
+    int physH = (int)(AB_H * g_scale);
     int x = pr.left + ((pr.right  - pr.left) - physW) / 2;
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
@@ -560,8 +560,8 @@ void ShowAboutModal(HWND parent) {
     if (!g_abHwnd) return;
 
     auto SP = [&](int lx, int ly, int lw, int lh) -> RECT {
-        return RECT{ (int)(lx * g_dpiScale), (int)(ly * g_dpiScale),
-                     (int)((lx + lw) * g_dpiScale), (int)((ly + lh) * g_dpiScale) };
+        return RECT{ (int)(lx * g_scale), (int)(ly * g_scale),
+                     (int)((lx + lw) * g_scale), (int)((ly + lh) * g_scale) };
     };
 
     // ── Hub buttons ────────────────────────────────────────────────
@@ -599,10 +599,10 @@ void ShowAboutModal(HWND parent) {
 
     // ── Close button (bottom-anchored, both views) ─────────────────
     {
-        int physBtnW = (int)(AB_BTN_W * g_dpiScale);
-        int physBtnH = (int)(AB_BTN_H * g_dpiScale);
+        int physBtnW = (int)(AB_BTN_W * g_scale);
+        int physBtnH = (int)(AB_BTN_H * g_scale);
         int btnX = (physW - physBtnW) / 2;
-        int btnY = physH - (int)(AB_BTN_BOTTOM_PAD * g_dpiScale) - physBtnH;
+        int btnY = physH - (int)(AB_BTN_BOTTOM_PAD * g_scale) - physBtnH;
         g_abClose = MkStdBtn(g_abHwnd, L"Close", ID_CLOSE,
                              btnX, btnY, physBtnW, physBtnH,
                              true, ButtonKind::Plugins);
@@ -615,11 +615,11 @@ void ShowAboutModal(HWND parent) {
     // Scrolls via the mouse wheel; the native scrollbar is suppressed so
     // it doesn't clash with the themed chrome.
     {
-        int edX = (int)(AB_READER_PAD * g_dpiScale);
-        int edY = (int)(AB_READER_TOP * g_dpiScale);
+        int edX = (int)(AB_READER_PAD * g_scale);
+        int edY = (int)(AB_READER_TOP * g_scale);
         int edW = physW - 2 * edX;
-        int closeTop = physH - (int)((AB_BTN_BOTTOM_PAD + AB_BTN_H) * g_dpiScale);
-        int edH = closeTop - edY - (int)(AB_READER_PAD * g_dpiScale);
+        int closeTop = physH - (int)((AB_BTN_BOTTOM_PAD + AB_BTN_H) * g_scale);
+        int edH = closeTop - edY - (int)(AB_READER_PAD * g_scale);
         // No WS_VSCROLL — the wheel subclass below handles scrolling and
         // ES_AUTOVSCROLL keeps the content scrollable without the
         // un-themed native bar.

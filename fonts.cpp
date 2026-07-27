@@ -4,6 +4,7 @@
 
 #include "fonts.h"
 #include "core.h"     // AppDir, g_dpiScale
+#include "scaling.h"  // g_scale (reader font follows UI scale)
 #include "config.h"   // g_cfg.fontName (opt-in reader font)
 #include "layout.h"   // LayoutReaderUseAppFont
 
@@ -192,7 +193,12 @@ Gdiplus::FontFamily* MakeFamily(const wchar_t* primary) {
 HFONT MakeReaderFont(int pointSize) {
     // EDIT/GDI want a height in logical units; negative = character height
     // (excludes internal leading), which is the usual choice for point sizes.
-    int px = (int)(pointSize * 96.0 / 72.0 * g_dpiScale + 0.5);
+    //
+    // Scaled by g_scale (= g_userScale * g_dpiScale) so the reader follows
+    // the UI-scale slider along with the rest of the modal (window, rects,
+    // buttons) and the chrome fonts. The About/Help modals were converted
+    // to full g_scale sizing in v1.5.1 so everything grows together.
+    int px = (int)(pointSize * 96.0 / 72.0 * g_scale + 0.5);
 
     // Face selection. Default is Georgia (legible for long documentation).
     // If the user opted in via user_layout.json (reader_use_app_font: true)

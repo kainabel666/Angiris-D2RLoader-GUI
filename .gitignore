@@ -2,3 +2,5 @@
 *.exe
 *.zip
 *.afj
+launcher_config.json
+plugin_manifest.json

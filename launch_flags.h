@@ -22,7 +22,7 @@
 
 #include "angiris_common.h"
 
-// Per-mod flag state. Persisted per-mod to <mod>\Launcher Files\
+// Per-mod flag state. Persisted per-mod to <mod>\Launcher Files
 // launcher_mod_cfg.json by mod_config. Switching the selected mod
 // triggers a Load that swaps these values out wholesale.
 struct ModSettings {

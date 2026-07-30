@@ -156,6 +156,35 @@ PluginConfig LoadPluginConfig(const wstring& modDir) {
     // a valid state we want to honor (suppress globals, show empty list).
     mf.present = true;
     mf.plugins = SanitizeEntries(ExtractStringArray(json, arrStart));
+
+    // Optional "author" scalar (v1.6) — used in the allowlist-rejection
+    // popup ("<author> has not authorized …"). Absent → empty, and the
+    // popup uses its no-author phrasing. Minimal inline scalar parse: find
+    // "author", expect a colon then a quoted string.
+    {
+        size_t p = json.find(L"\"author\"");
+        if (p != wstring::npos) {
+            p += 8;                                  // past "author"
+            while (p < json.size() &&
+                   (json[p]==L' '||json[p]==L'\t'||json[p]==L'\n'||json[p]==L'\r'))
+                ++p;
+            if (p < json.size() && json[p] == L':') {
+                ++p;
+                while (p < json.size() &&
+                       (json[p]==L' '||json[p]==L'\t'||json[p]==L'\n'||json[p]==L'\r'))
+                    ++p;
+                if (p < json.size() && json[p] == L'"') {
+                    ++p;
+                    wstring val;
+                    while (p < json.size() && json[p] != L'"') {
+                        if (json[p] == L'\\' && p + 1 < json.size()) { ++p; }
+                        val += json[p++];
+                    }
+                    mf.author = val;
+                }
+            }
+        }
+    }
     return mf;
 }
 

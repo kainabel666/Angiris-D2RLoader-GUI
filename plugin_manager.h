@@ -8,8 +8,8 @@
 //  the plugin's active/disabled state. Save commits the moves to disk.
 //
 //  Plugin locations on disk:
-//    Global (G):  <d2rPath>\plugins\
-//    Per-mod (M): <d2rPath>\mods\<ModName>\<ModName>.mpq\Plugins\
+//    Global (G):  <d2rPath>\plugins
+//    Per-mod (M): <d2rPath>\mods\<ModName>\<ModName>.mpq\Plugins
 //
 //  Each plugin folder has a sibling Disabled\ subfolder. Plugins in
 //  the parent folder are active; plugins in Disabled\ are inactive.
@@ -40,7 +40,7 @@
 //
 // The popup runs its own message loop until the user clicks Save or
 // Cancel (or closes the window). Save commits any toggled plugins
-// to disk by moving the .dll files between active and Disabled\
+// to disk by moving the .dll files between active and Disabled
 // folders. Cancel makes no disk changes.
 //
 // Modal with respect to `parent` — the parent is EnableWindow(FALSE)

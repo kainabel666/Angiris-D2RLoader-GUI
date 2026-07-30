@@ -28,7 +28,15 @@ installed in your Diablo II: Resurrected folder.
   folder, or uninstall the mod
 * Automatic save-folder backups before destructive actions (Overwrite install
   and Uninstall), with rotation (most recent 5 kept)
-* Drag-and-drop mod installer - drop .zip files onto the launcher to install
+* Drag-and-drop installer - drop .zip files onto the launcher to install
+      Mods:     drop a mod .zip to install it
+      Plugins:  drop a plugin .zip (with a plugin_info.json manifest) to
+                route its files into place. Drop on the main window for a
+                global install, or on the Plugin Manager for the selected
+                mod. Overwrite prompts keep a .old backup of any config,
+                and a mod's author manifest gates which plugins install.
+      Patches:  drop a bare .json patch (or a zip of .json patches) - no
+                manifest needed - and it routes to the patches folder
 * Self-updating - the launcher checks for its own new versions on GitHub,
   flags the version label gold when one's available, and can install the
   update in place with a Restart button
@@ -73,6 +81,13 @@ installed in your Diablo II: Resurrected folder.
       shared plugin_manifest.json beside the launcher and apply to
       every mod that uses that file. Same manifest covers both DLLs
       and JSON patches.
+* Logs tool (v1.6) - the Logs button opens an in-launcher grid of your
+  <D2R>\logs\ files; left-click one to copy the file to the clipboard so
+  you can paste it straight into Discord for a help request
+* Mods tool (v1.6) - the Mods button opens a grid of every mod folder
+  (including ones with no modinfo.json, shown greyed with "No Mod Info");
+  click a folder to view, edit, or create its modinfo.json in a built-in
+  editor covering every field, with name/savepath required
 * A collapsible bottom panel (click the arrow) with four sections -
   references, local tools, downloads, and tutorials - each opening a
   window of links or tool launchers
@@ -778,7 +793,7 @@ D2RLoader community server. Close or Esc dismisses it.
   HUB VIEW
   --------
 
-      Angiris  v1.5
+      Angiris  v1.6
       D2RLoader  v1.0.1 - beta        (or "Not detected")
 
       [   Latest D2RLoader   ]        <- download + install button
@@ -1060,6 +1075,81 @@ it's a plugin or a patch.
   names. Names are matched case-insensitively.
 
   A curated default plugin_manifest.json ships with the launcher.
+
+
+--------------------------------------------------------------------------------
+  INSTALLING PLUGINS & PATCHES (v1.6)
+--------------------------------------------------------------------------------
+
+You can install plugins and patches by dragging them onto the launcher -
+no manual copying into d2rloader\ folders.
+
+  WHERE YOU DROP decides the scope:
+    * On the MAIN window        -> global install (<D2R>\d2rloader\...),
+                                   available to every mod
+    * On the PLUGIN MANAGER     -> installs into the currently-selected mod
+                                   (<D2R>\mods\<Mod>\d2rloader\...)
+
+  PLUGINS come as a .zip with a plugin_info.json manifest at its root. The
+  manifest lists each file and where it goes (plugins, config, patches,
+  readmes, a mod's excel folder, or a custom destPath). The launcher reads
+  it and routes every file automatically. Full manifest format is in
+  plugin_info_GUIDE.md.
+
+  PATCHES don't need a manifest:
+    * Drop a bare .json file      -> straight to the patches folder
+    * Drop a .zip of .json files  -> the launcher extracts just the JSONs
+                                     to the patches folder (ignores anything
+                                     else in the zip)
+
+  OVERWRITES are always confirmed. If a file already exists you're asked
+  before it's replaced, and the previous version is kept as <name>.old
+  (for config .toml, .json, and excel .txt) so you can copy settings back.
+  If a plugin is installed but disabled, re-installing it replaces the
+  disabled copy in place - it stays disabled and you won't get a duplicate.
+
+  AUTHOR ALLOWLIST. If the selected mod ships a plugin_config.json manifest,
+  only the plugins and patches its author sanctioned will install into that
+  mod; anything else is declined with a short notice. Global installs (main
+  window) are not gated.
+
+  READMEs. A plugin can ship a readme; it's stored globally and viewable
+  from the Plugin Manager (the READMEs button, or right-click a row ->
+  Open README).
+
+
+--------------------------------------------------------------------------------
+  LOGS TOOL (v1.6)
+--------------------------------------------------------------------------------
+
+The left-rail LOGS button opens a grid of the files in <D2R>\logs\
+(crash logs, d2rloader.log, and so on), each shown as an icon with its
+filename beneath.
+
+Left-click a file's icon to copy the actual file to your clipboard. You can
+then paste it (Ctrl+V) into Discord, an email, or an Explorer folder and it
+attaches as a file - handy for sharing a crash log when asking for help.
+
+
+--------------------------------------------------------------------------------
+  MODS TOOL (v1.6)
+--------------------------------------------------------------------------------
+
+The left-rail MODS button opens a grid of every folder in <D2R>\mods\,
+including folders that don't have a modinfo.json yet (shown greyed with a
+red "No Mod Info" label).
+
+Click a folder to open its modinfo:
+  * A mod that HAS a modinfo.json opens in read-only view; click EDIT
+    (top-right) to make the fields editable, then Save.
+  * A folder with NO modinfo.json opens the editor directly so you can
+    create one.
+
+The editor covers every modinfo field - name, savepath, title, author,
+version, description, overview, docs, website, discord, banner, and the two
+update fields (GitHub / Manifest). "name" and "savepath" are required; the
+launcher won't save with either blank. Saving writes standard JSON and the
+mod list updates immediately.
 
 
 --------------------------------------------------------------------------------

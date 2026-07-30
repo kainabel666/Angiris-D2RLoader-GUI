@@ -247,7 +247,7 @@ int ShowConflictDialog(HWND parent, const wstring& modName) {
     g_dlgModNamePtr = &modName;
 
     HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
         L"AngirisConflictDlg",
         L"Mod Folder Already Exists",
         WS_POPUP | WS_CAPTION,
@@ -504,7 +504,7 @@ int ShowLauncherUpdateDialog(HWND parent, const wstring& latestTag) {
     g_dlgCurrentTagPtr = &currentVer;
 
     HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
         L"AngirisLauncherUpdateDlg",
         L"Launcher Update Available",
         WS_POPUP | WS_CAPTION,
@@ -703,7 +703,7 @@ void ShowNoModInfoDialog(HWND parent, const wstring& zipName) {
 
     g_dlgZipNamePtr = &zipName;
     HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
         L"AngirisNoModInfoDlg",
         L"Invalid Mod Archive",
         WS_POPUP | WS_CAPTION,
@@ -908,7 +908,7 @@ int ShowUninstallConfirmDialog(HWND parent, const wstring& modName) {
     int result = 0;
     g_dlgUninstallNamePtr = &modName;
     HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
         L"AngirisUninstallDlg",
         L"Delete Mod",
         WS_POPUP | WS_CAPTION,
@@ -1115,7 +1115,7 @@ int ShowSetPathDialog(HWND parent) {
 
     int result = 0;
     HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
         L"AngirisSetPathDlg",
         L"D2R Install Folder Not Set",
         WS_POPUP | WS_CAPTION,
@@ -1386,7 +1386,7 @@ HWND ShowProgressDialog(HWND parent) {
     int cy = (pr.top + pr.bottom) / 2 - dlgH / 2;
 
     HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_TOPMOST,
+        WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
         L"AngirisProgressDlg",
         L"Installing Mods",
         WS_POPUP | WS_CLIPCHILDREN,

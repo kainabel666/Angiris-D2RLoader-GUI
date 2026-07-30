@@ -810,7 +810,7 @@ static void ShowLoaderOptionsModal(HWND parent, const wchar_t* title,
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
     g_boHwnd = CreateWindowExW(
-        WS_EX_TOPMOST,     // no DLGMODALFRAME — our own frame_modbanner
+        0,  // owned popup: stays above its owner (launcher) without pinning over other apps     // no DLGMODALFRAME — our own frame_modbanner
                            // is the visible border; the system-drawn
                            // 3D edge from DLGMODALFRAME was showing as
                            // a bright white ring around the popup.

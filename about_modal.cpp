@@ -551,7 +551,7 @@ void ShowAboutModal(HWND parent) {
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
     g_abHwnd = CreateWindowExW(
-        WS_EX_TOPMOST,     // no DLGMODALFRAME — frame_modbanner is the border
+        0,  // owned popup: stays above its owner (launcher) without pinning over other apps     // no DLGMODALFRAME — frame_modbanner is the border
         L"AngirisAboutModal",
         L"About",
         WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,

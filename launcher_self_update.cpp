@@ -501,7 +501,7 @@ static void ShowLauncherUpdatePopup() {
     int y  = (sh - h) / 2;
 
     HWND wnd = CreateWindowExW(
-        WS_EX_TOPMOST,
+        0,  // owned popup: stays above its owner (launcher) without pinning over other apps
         L"AngirisLauncherUpdatePopup",
         L"Updating Angiris Launcher",
         WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,

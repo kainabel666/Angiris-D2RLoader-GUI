@@ -263,7 +263,7 @@ void ShowHelpModal(HWND parent) {
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
     g_hmHwnd = CreateWindowExW(
-        WS_EX_TOPMOST,
+        0,  // owned popup: stays above its owner (launcher) without pinning over other apps
         L"AngirisHelpModal", L"Help",
         WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
         x, y, physW, physH,

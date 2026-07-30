@@ -37,8 +37,9 @@ A: v1.4 removed the Options nav button. Settings live in the Basic Options
 
 Q: It says "No Mods Found" at startup.
 A: The launcher looked in <D2R>\mods\ and found nothing. Use "Nexus Mod
-   Directory" (center column) to find mods, open your mods folder with the
-   left-rail "Mods" button, drop the mod in there, then click Refresh.
+   Directory" (center column) to find mods, put the mod folder in
+   <D2R>\mods\, then click Refresh. (You can browse your mod folders with
+   the left-rail "Mods" button - see the MODS TOOL section below.)
 
 
 --------------------------------------------------------------------------------
@@ -256,6 +257,55 @@ Q: I don't see (G) or (M) tags on my plugin rows any more. Where did they
    go?
 A: v1.3 replaced the inline (G) / (M) tags with dedicated "Global plugins"
    and "Mod plugins" section headers. Same information, less visual noise.
+
+
+Q: How do I install a plugin? (v1.6)
+A: Drag the plugin's zip onto the launcher. Drop it on the MAIN window to
+   install it globally (for every mod), or drop it on the PLUGIN MANAGER
+   window to install it into the currently-selected mod. The launcher reads
+   the zip's plugin_info.json and puts each file where it belongs - the .dll
+   into plugins\, config into config\, any readme into the readmes store,
+   and so on. No manual copying.
+
+Q: I dropped a plugin and got asked about overwriting. What are my options?
+A: If a plugin with that name is already installed you'll be asked before
+   anything is replaced. For a plugin with config you can choose to replace
+   just the DLL, just the config, both, or cancel. Whenever a config file
+   (or a patch, or an excel .txt) is overwritten, the old one is saved
+   alongside it as <name>.old so you can copy your settings back.
+
+Q: I dropped a plugin but nothing happened / it said it wasn't authorized.
+A: If the selected mod ships a plugin manifest (plugin_config.json), it only
+   accepts the plugins and patches the mod author sanctioned. A plugin that
+   isn't on that list is declined with a short notice naming the mod (and
+   author, if given). Drop it on the MAIN window instead to install it
+   globally, or ask the mod author to add it to their manifest.
+
+Q: How do I install a patch? (v1.6)
+A: Even easier - just drop the patch's .json file straight onto the launcher
+   (main window = global, Plugin Manager = the selected mod). No zip, no
+   manifest needed. You can also drop a zip that contains one or more .json
+   patches and the launcher will extract just the JSON files to the patches
+   folder. Existing patches prompt before overwriting and keep a .old backup.
+
+Q: I re-installed a plugin I had disabled and now it's... still disabled?
+A: That's intended (v1.6). If a plugin is installed but toggled off (sitting
+   in the Disabled\ folder), dropping it again overwrites the disabled copy
+   in place rather than creating a fresh enabled one. A re-install won't
+   silently turn something back on that you deliberately turned off, and you
+   won't end up with two copies.
+
+Q: What's the READMEs button in the Plugin Manager?
+A: If a plugin shipped a readme, it's viewable here (v1.6). Click READMEs for
+   a picker of every plugin that has one, or right-click a plugin row and
+   choose "Open README". Readmes are stored globally so they're always found
+   regardless of which mod a plugin was installed into.
+
+Q: I'm a mod author - how do I make a plugin zip the launcher understands?
+A: Put a plugin_info.json in the zip describing where each file goes. The full
+   format (including custom destPath locations and the required fields) is in
+   plugin_info_GUIDE.md that ships alongside the launcher. Patches don't need
+   a manifest at all - a bare .json is enough.
 
 
 --------------------------------------------------------------------------------
@@ -1081,6 +1131,61 @@ A: Wide. The row is much wider than it is tall (96 x 600), and the image
 Q: How do I set my mod up so that the launcher checks for updates?
 A: See README.txt > HOW TO SET UP MY MOD FOR UPDATE CHECKS. It is the last section
    of the README, right before the CREDITS.
+
+
+--------------------------------------------------------------------------------
+  LOGS TOOL  (v1.6)
+--------------------------------------------------------------------------------
+
+
+Q: What does the Logs button do now?
+A: It opens an in-launcher grid of the files in <D2R>\logs\ (crash logs,
+   d2rloader.log, etc.) instead of opening an Explorer window. Each file
+   shows as an icon with its name beneath it.
+
+Q: How do I send a log to someone for help?
+A: Left-click the log's icon. That copies the actual file to your clipboard,
+   so you can paste it (Ctrl+V) straight into Discord (or an Explorer folder,
+   an email, etc.) and it attaches as a file. No need to hunt through folders.
+
+Q: Nothing happens when I click - or the grid is empty.
+A: An empty grid means <D2R>\logs\ has no files yet (the game writes them as
+   it runs and crashes). Clicking copies silently - there's no popup, but the
+   file is on your clipboard ready to paste.
+
+
+--------------------------------------------------------------------------------
+  MODS TOOL  (v1.6)
+--------------------------------------------------------------------------------
+
+
+Q: What does the Mods button do now?
+A: It opens a grid of every folder in <D2R>\mods\ - including folders that
+   don't have a modinfo.json yet. Folders with a modinfo show a normal folder
+   icon and the mod's name; folders without one are greyed out with a red
+   "No Mod Info" label so you can spot them.
+
+Q: How do I view or edit a mod's info?
+A: Click the mod's folder icon. For a mod that already has a modinfo.json,
+   this opens the info in read-only view; click EDIT (top-right) to make the
+   fields editable, then Save. For a folder with no modinfo, clicking it opens
+   the editor directly so you can create one.
+
+Q: What can I edit?
+A: Every modinfo.json field: name, savepath, title, author, version,
+   description, overview, docs, website, discord, banner, and the two update
+   fields (GitHub / Manifest). "name" and "savepath" are required - the
+   launcher won't save with either left blank.
+
+Q: I created / edited a modinfo. Do I need to refresh?
+A: No. The Mods grid and the main mod list both update the moment you save,
+   so a newly-created mod appears right away.
+
+Q: Is it safe? Will it break my modinfo.json?
+A: The editor writes standard JSON with proper escaping, and only writes the
+   fields that have values (plus the two required ones). If you're unsure,
+   the file is plain text - back it up first and you can always inspect what
+   the launcher wrote.
 
 
 --------------------------------------------------------------------------------

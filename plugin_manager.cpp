@@ -33,7 +33,11 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "plugin_manager.h"
+#include <algorithm>          // std::sort (readme picker)
 #include "plugin_config.h"     // v1.3: per-mod manifest mode + sweeps
+#include "plugin_drop_ui.h"     // v1.6: HandlePluginManagerDrop (drag-drop)
+#include "plugin_install.h"     // v1.6: PeekZipKind, ZipKind (patch bundle routing)
+#include "readme_reader.h"      // v1.6: ShowReadmeReader
 #include "plugin_manifest.h"   // v1.3: friendly-name lookup
 #include "core.h"            // g_hInst, g_dpiScale
 #include "scaling.h"         // S(), SF()
@@ -91,7 +95,14 @@ static HWND    g_pmHwnd      = nullptr;
 static HWND    g_pmList      = nullptr;
 static HWND    g_pmSaveBtn   = nullptr;
 static HWND    g_pmCancelBtn = nullptr;
+static HWND    g_pmReadmesBtn = nullptr;   // v1.6: opens the readme picker
 static wstring g_pmModName;    // display name of the selected mod, or empty
+static wstring g_pmModFolder;  // folder name of the selected mod (drag-drop scope)
+// The mod + d2rPath the manager was opened with, retained so a drag-drop
+// install can rescan and refresh the list in place (v1.6). g_pmSelectedMod
+// may be null (no mod selected / globals view).
+static const ModInfo* g_pmSelectedMod = nullptr;
+static wstring        g_pmD2rPath;
 static bool    g_pmClassReg   = false;
 
 // v1.3 manifest-mode state. g_pmConfigMode is true whenever the
@@ -157,6 +168,10 @@ static bool ShowRenameModal(HWND parent,
                             const wstring& dllName,
                             const wstring& currentFriendly,
                             wstring& outNewName);
+
+// v1.6: open a picker listing every plugin that has a readme; the chosen
+// one opens in the themed reader. Defined after PluginManagerProc.
+static void ShowReadmePicker(HWND pmHwnd);
 
 // ── Filesystem helpers ───────────────────────────────────────────────
 
@@ -436,12 +451,29 @@ static LRESULT CALLBACK PMListSubclass(HWND hw, UINT msg,
         }
         if (dllName.empty()) return 0;
 
+        // Does this plugin have a readme (recorded at install time)? Drives
+        // whether the "Open README" item is enabled.
+        wstring readmeRel = GetPluginReadmePath(dllName);
+        bool hasReadme = !readmeRel.empty();
+
         HMENU menu = CreatePopupMenu();
         AppendMenuW(menu, MF_STRING, 1, L"Rename...");
+        AppendMenuW(menu, MF_STRING | (hasReadme ? 0 : MF_GRAYED),
+                    2, L"Open README");
         int cmd = TrackPopupMenu(menu,
                                  TPM_RETURNCMD | TPM_LEFTALIGN | TPM_RIGHTBUTTON,
                                  scr.x, scr.y, 0, hw, nullptr);
         DestroyMenu(menu);
+
+        if (cmd == 2) {
+            // Open this plugin's readme in the themed reader. Path is
+            // launcher-relative (or absolute for out-of-tree readmes).
+            wstring full = readmeRel;
+            if (full.size() > 1 && full[1] != L':')       // not absolute
+                full = AppDir() + L"\\" + readmeRel;
+            ShowReadmeReader(GetParent(hw), GetPluginFriendlyName(dllName), full);
+            return 0;
+        }
         if (cmd != 1) return 0;
 
         wstring currentFriendly = GetPluginFriendlyName(dllName);
@@ -667,12 +699,99 @@ static void PMDrawButton(DRAWITEMSTRUCT* di, const wchar_t* label) {
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 }
 
+// ── In-place list refresh (v1.6) ─────────────────────────────────────
+//
+// Re-run the scan/build for the manager's current mod + mode and refill
+// the listbox, so a drag-drop install shows up without reopening. Mirrors
+// the scan→build→fill sequence in ShowPluginManager, minus the one-time
+// window/discovery setup. Manifest-mode mods are read-only inventories
+// (BuildConfigRows), legacy mods rescan disk (ScanPlugins + BuildLegacyRows).
+static void RefreshPluginManagerContents() {
+    if (!g_pmHwnd) return;
+
+    g_pluginList.clear();
+    g_pmRows.clear();
+
+    PluginConfig manifest;
+    if (g_pmSelectedMod) manifest = LoadPluginConfig(g_pmSelectedMod->dir);
+
+    if (manifest.present) {
+        g_pmConfigMode = true;
+        if (manifest.plugins.empty()) {
+            g_pmConfigEmpty = true;
+            g_pmEmptyMessage = FormatEmptyConfigMessage(g_pmSelectedMod);
+        } else {
+            g_pmConfigEmpty = false;
+            wstring modD2rLoaderDir = g_pmSelectedMod->dir + L"\\d2rloader";
+            vector<bool> configFound = RunPluginRecoverySweep(
+                modD2rLoaderDir, g_pmD2rPath, manifest.plugins);
+            BuildConfigRows(manifest, configFound);
+        }
+    } else {
+        g_pmConfigMode = false;
+        ScanPlugins(g_pmSelectedMod, g_pmD2rPath);
+        BuildLegacyRows();
+    }
+
+    // Refill the listbox to match the rebuilt rows. If the list was empty
+    // before (manifest-empty mode) g_pmList may be null — in that case a
+    // repaint of the popup shows the message; nothing to refill.
+    if (g_pmList) {
+        SendMessageW(g_pmList, LB_RESETCONTENT, 0, 0);
+        for (size_t i = 0; i < g_pmRows.size(); ++i)
+            SendMessageW(g_pmList, LB_ADDSTRING, 0,
+                         (LPARAM)g_pmRows[i].text.c_str());
+        SendMessageW(g_pmList, LB_SETITEMHEIGHT, 0,
+                     (LPARAM)(int)(PM_ROW_H * g_dpiScale));
+        InvalidateRect(g_pmList, nullptr, TRUE);
+    }
+    InvalidateRect(g_pmHwnd, nullptr, FALSE);
+}
+
 // ── Window proc ──────────────────────────────────────────────────────
 
 static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
                                           WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_ERASEBKGND: return 1;
+
+    case WM_DROPFILES: {
+        // A zip dropped on the plugin manager is ALWAYS a plugin, installed
+        // to the manager's selected mod (mod scope). No mod-vs-plugin
+        // detection here — the main window handles mods.
+        HDROP hDrop = (HDROP)wp;
+        UINT n = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
+        vector<wstring> zips;
+        vector<wstring> patches;
+        for (UINT i = 0; i < n; ++i) {
+            wchar_t p[MAX_PATH * 2];
+            if (DragQueryFileW(hDrop, i, p, MAX_PATH * 2) > 0) {
+                wstring path = p;
+                size_t dot = path.find_last_of(L'.');
+                if (dot == wstring::npos) continue;
+                wstring ext = path.substr(dot);
+                if (_wcsicmp(ext.c_str(), L".zip") == 0)
+                    zips.push_back(path);
+                else if (_wcsicmp(ext.c_str(), L".json") == 0)
+                    patches.push_back(path);      // bare patch → patches folder
+            }
+        }
+        DragFinish(hDrop);
+        for (const wstring& z : zips) {
+            // A zip on the plugin manager is a plugin OR a patch bundle
+            // (manifest-less zip of .json files). Peek to route.
+            ZipKind kind = PeekZipKind(z);
+            if (kind == ZipKind::PatchBundle)
+                HandlePluginManagerPatchBundle(hw, z, g_pmModFolder);
+            else
+                HandlePluginManagerDrop(hw, z, g_pmModFolder);   // plugin (or bare)
+        }
+        for (const wstring& j : patches)
+            HandlePluginManagerPatchDrop(hw, j, g_pmModFolder);
+        // Rescan + rebuild the list so newly-installed plugins appear.
+        if (!zips.empty() || !patches.empty()) RefreshPluginManagerContents();
+        return 0;
+    }
 
     case WM_PAINT: {
         PAINTSTRUCT ps; HDC hdc = BeginPaint(hw, &ps);
@@ -801,6 +920,10 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
             DestroyWindow(hw);
             return 0;
         }
+        if (id == 50) {          // v1.6: READMEs picker
+            ShowReadmePicker(hw);
+            return 0;
+        }
         return 0;
     }
 
@@ -825,6 +948,9 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
         g_pmList      = nullptr;
         g_pmSaveBtn   = nullptr;
         g_pmCancelBtn = nullptr;
+        g_pmReadmesBtn = nullptr;
+        g_pmSelectedMod = nullptr;
+        g_pmD2rPath.clear();
         // Don't PostQuitMessage — that would propagate WM_QUIT to the
         // launcher's main message loop and quit the whole app. The
         // pump in ShowPluginManager checks g_pmHwnd and exits cleanly.
@@ -842,6 +968,9 @@ void ShowPluginManager(HWND parent,
     if (g_pmHwnd) return;   // one popup at a time
 
     g_pmModName = selectedMod ? selectedMod->name : L"";
+    g_pmModFolder = selectedMod ? selectedMod->folder : L"";   // for drag-drop scope
+    g_pmSelectedMod = selectedMod;   // retained for in-place refresh (v1.6)
+    g_pmD2rPath     = d2rPath;
 
     // Reset v1.3 manifest-mode state before each invocation so a stale
     // value from a previous popup never leaks through.
@@ -976,16 +1105,25 @@ void ShowPluginManager(HWND parent,
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
     g_pmHwnd = CreateWindowExW(
-        WS_EX_TOPMOST,     // no DLGMODALFRAME — the frame_modbanner
-                           // 9-slice is the visible border; the system
-                           // 3D edge DLGMODALFRAME adds showed up as a
-                           // bright white ring around the popup.
+        0,                 // NOT WS_EX_TOPMOST: as an owned popup (owner =
+                           // the launcher, passed below), it already stays
+                           // above the launcher via owner/owned z-order.
+                           // TOPMOST pinned it above EVERY window system-
+                           // wide, covering unrelated Explorer windows the
+                           // user had brought to the front. No DLGMODALFRAME
+                           // either — the frame_modbanner 9-slice is the
+                           // visible border; the system 3D edge showed up as
+                           // a bright white ring around the popup.
         L"AngirisPluginManager",
         L"Plugin Manager",
         WS_POPUP | WS_VISIBLE,
         x, y, physW, physH,
         parent, nullptr, g_hInst, nullptr);
     if (!g_pmHwnd) return;
+
+    // Accept plugin-zip drops → mod-scoped install for the selected mod
+    // (see the WM_DROPFILES handler in PluginManagerProc).
+    DragAcceptFiles(g_pmHwnd, TRUE);
 
     // Owner-drawn LISTBOX. Sized to fill the area between the title
     // band and the button row, padded by PM_PAD on each side. Skipped
@@ -1029,26 +1167,33 @@ void ShowPluginManager(HWND parent,
     int physGap  = (int)(PM_BTN_GAP * g_dpiScale);
 
     if (g_pmConfigMode) {
-        // Single Close button, centered. Reuse the Cancel control ID
-        // (2) so the existing WM_COMMAND handler dismisses it for free.
-        // ButtonKind::Plugins so PaintOwnerDrawButton gives it the
-        // nexus_update asset + hover glow + click shrink (no hover grow),
-        // matching the main window's Plugins button behaviour.
-        int btnX = (physW - physBtnW) / 2;
+        // Manifest mode: Close + READMEs, side by side, centered. (READMEs
+        // must share the bottom row — placing it above would put it behind
+        // the listbox, which fills the space up to this row.)
+        int rowW = physBtnW * 2 + physGap;
+        int rowX = (physW - rowW) / 2;
         g_pmCancelBtn = MkStdBtn(g_pmHwnd, L"Close", 2,
-            btnX, btnRowY, physBtnW, physBtnH,
+            rowX, btnRowY, physBtnW, physBtnH,
+            true, ButtonKind::Plugins);
+        g_pmReadmesBtn = MkStdBtn(g_pmHwnd, L"READMEs", 50,
+            rowX + physBtnW + physGap, btnRowY, physBtnW, physBtnH,
             true, ButtonKind::Plugins);
     } else {
-        int btnRowW   = physBtnW * 2 + physGap;
-        int btnRowX   = (physW - btnRowW) / 2;
-        int saveX     = btnRowX;                              // v1.3: was cancelX
-        int cancelX   = btnRowX + physBtnW + physGap;         // v1.3: was saveX
+        // Legacy mode: Save + Cancel + READMEs, three across, centered.
+        int rowW   = physBtnW * 3 + physGap * 2;
+        int rowX   = (physW - rowW) / 2;
+        int saveX     = rowX;
+        int cancelX   = rowX + physBtnW + physGap;
+        int readmesX  = rowX + (physBtnW + physGap) * 2;
 
+        g_pmSaveBtn = MkStdBtn(g_pmHwnd, L"Save Selection", 1,
+            saveX, btnRowY, physBtnW, physBtnH,
+            true, ButtonKind::Plugins);
         g_pmCancelBtn = MkStdBtn(g_pmHwnd, L"Cancel", 2,
             cancelX, btnRowY, physBtnW, physBtnH,
             true, ButtonKind::Plugins);
-        g_pmSaveBtn = MkStdBtn(g_pmHwnd, L"Save Selection", 1,
-            saveX, btnRowY, physBtnW, physBtnH,
+        g_pmReadmesBtn = MkStdBtn(g_pmHwnd, L"READMEs", 50,
+            readmesX, btnRowY, physBtnW, physBtnH,
             true, ButtonKind::Plugins);
     }
 
@@ -1269,7 +1414,17 @@ static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             wchar_t buf[1024] = {};
             GetWindowTextW(g_rmInput, buf, 1024);
             g_rmText = buf;
-            InvalidateRect(hw, nullptr, FALSE);
+            // Invalidate ONLY the input-text box, not the whole window.
+            // A full-window InvalidateRect repainted the owner-drawn OK /
+            // Cancel buttons on every keystroke, making them flicker. The
+            // edit rect mirrors the paint case's editX/Y/W/H computation.
+            RECT cr; GetClientRect(hw, &cr);
+            int editX = (int)(RM_PAD * g_dpiScale);
+            int editY = (int)((RM_TITLE_H + RM_LABEL_H + 8) * g_dpiScale);
+            int editW = cr.right - 2 * editX;
+            int editH = (int)(RM_EDIT_H * g_dpiScale);
+            RECT inputRc = { editX, editY, editX + editW, editY + editH };
+            InvalidateRect(hw, &inputRc, FALSE);
             return 0;
         }
         if (code == BN_CLICKED) {
@@ -1377,7 +1532,9 @@ static bool ShowRenameModal(HWND parent,
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
     g_rmHwnd = CreateWindowExW(
-        WS_EX_TOPMOST,     // no DLGMODALFRAME — same reason as the
+        0,                 // owned popup: above its owner without pinning
+                           // over other apps (see the manager window above).
+                           // No DLGMODALFRAME — same reason as the
                            // plugin manager above: frame_modbanner is
                            // the border, the system 3D edge read as a
                            // white ring.
@@ -1400,12 +1557,20 @@ static bool ShowRenameModal(HWND parent,
     // its EN_CHANGE mirrors the buffer into g_rmText, which the paint
     // pass renders inside the black shadow well.
     g_rmInput = CreateWindowExW(0,
-        L"EDIT", currentFriendly.c_str(),
+        L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
         -100, -100, 1, 1,
         g_rmHwnd, (HMENU)(UINT_PTR)10, g_hInst, nullptr);
     if (g_rmInput) {
         SendMessage(g_rmInput, EM_LIMITTEXT, 512, 0);
+        // Set the initial text AFTER g_rmInput is assigned. Creating the
+        // EDIT with initial text fires EN_CHANGE during CreateWindowExW —
+        // at which point g_rmInput isn't assigned yet, so the EN_CHANGE
+        // handler reads a stale handle and wipes g_rmText. Setting it here
+        // fires EN_CHANGE with g_rmInput valid, correctly mirroring the
+        // pre-populated friendly name into g_rmText for the paint pass.
+        SetWindowTextW(g_rmInput, currentFriendly.c_str());
+        g_rmText = currentFriendly;   // ensure the buffer matches immediately
         // Select-all so the first keystroke replaces the pre-populated
         // friendly name.
         SendMessage(g_rmInput, EM_SETSEL, 0, -1);
@@ -1449,4 +1614,129 @@ static bool ShowRenameModal(HWND parent,
         return true;
     }
     return false;
+}
+
+// ── v1.6: README picker ──────────────────────────────────────────────
+// A dropdown of every plugin that has a readme (by friendly name where
+// set, else DLL name). Selecting one opens it in the themed reader.
+// Mirrors the excel picker's simple combobox layout.
+
+namespace {
+
+struct RmPickResult { int sel = -1; bool done = false; bool cancel = false; };
+enum { RMP_COMBO = 300, RMP_OK = 301, RMP_CANCEL = 302 };
+
+// The dll→readme pairs backing the current picker (index = combo item).
+static std::vector<std::pair<wstring, wstring>> g_rmpEntries;
+
+LRESULT CALLBACK RmPickProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_COMMAND) {
+        auto* r = (RmPickResult*)GetWindowLongPtrW(hw, GWLP_USERDATA);
+        WORD id = LOWORD(wp);
+        if (r && id == RMP_OK) {
+            HWND combo = GetDlgItem(hw, RMP_COMBO);
+            r->sel = (int)SendMessageW(combo, CB_GETCURSEL, 0, 0);
+            r->done = true;
+            DestroyWindow(hw);
+        } else if (r && (id == RMP_CANCEL || id == IDCANCEL)) {
+            r->cancel = true; r->done = true;
+            DestroyWindow(hw);
+        }
+        return 0;
+    }
+    if (msg == WM_CLOSE) {
+        auto* r = (RmPickResult*)GetWindowLongPtrW(hw, GWLP_USERDATA);
+        if (r) { r->cancel = true; r->done = true; }
+        DestroyWindow(hw);
+        return 0;
+    }
+    return DefWindowProcW(hw, msg, wp, lp);
+}
+
+} // namespace
+
+static void ShowReadmePicker(HWND pmHwnd) {
+    g_rmpEntries = GetAllPluginReadmes();
+    if (g_rmpEntries.empty()) {
+        MessageBoxW(pmHwnd,
+            L"No plugin READMEs are available yet. READMEs appear here after "
+            L"installing a plugin that includes one.",
+            L"READMEs", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    // Sort by display label for a stable list.
+    std::sort(g_rmpEntries.begin(), g_rmpEntries.end(),
+              [](const auto& a, const auto& b) {
+                  wstring la = GetPluginFriendlyName(a.first);
+                  if (la.empty()) la = a.first;
+                  wstring lb = GetPluginFriendlyName(b.first);
+                  if (lb.empty()) lb = b.first;
+                  return _wcsicmp(la.c_str(), lb.c_str()) < 0;
+              });
+
+    static bool reg = false;
+    if (!reg) {
+        WNDCLASSEXW wc = { sizeof(wc) };
+        wc.lpfnWndProc   = RmPickProc;
+        wc.hInstance     = g_hInst;
+        wc.lpszClassName = L"AngirisReadmePicker";
+        wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        RegisterClassExW(&wc);
+        reg = true;
+    }
+
+    int w = 460, h = 190;
+    RECT pr; GetWindowRect(pmHwnd, &pr);
+    int x = pr.left + ((pr.right - pr.left) - w) / 2;
+    int y = pr.top  + ((pr.bottom - pr.top) - h) / 2;
+
+    RmPickResult res;
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup above owner only
+        L"AngirisReadmePicker", L"Plugin READMEs",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        x, y, w, h, pmHwnd, nullptr, g_hInst, nullptr);
+    if (!dlg) return;
+    SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)&res);
+
+    CreateWindowExW(0, L"STATIC", L"Select a plugin README to open:",
+        WS_CHILD | WS_VISIBLE, 16, 14, w - 32, 20, dlg, nullptr, g_hInst, nullptr);
+
+    HWND combo = CreateWindowExW(0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
+        16, 44, w - 32, 240, dlg, (HMENU)RMP_COMBO, g_hInst, nullptr);
+    for (const auto& e : g_rmpEntries) {
+        wstring label = GetPluginFriendlyName(e.first);
+        if (label.empty()) label = e.first;
+        SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)label.c_str());
+    }
+    SendMessageW(combo, CB_SETCURSEL, 0, 0);
+
+    CreateWindowExW(0, L"BUTTON", L"Open",
+        WS_CHILD | WS_VISIBLE, w - 210, 100, 90, 30,
+        dlg, (HMENU)RMP_OK, g_hInst, nullptr);
+    CreateWindowExW(0, L"BUTTON", L"Cancel",
+        WS_CHILD | WS_VISIBLE, w - 110, 100, 90, 30,
+        dlg, (HMENU)RMP_CANCEL, g_hInst, nullptr);
+
+    EnableWindow(pmHwnd, FALSE);
+    MSG m;
+    while (!res.done && GetMessageW(&m, nullptr, 0, 0)) {
+        if (IsDialogMessageW(dlg, &m)) continue;
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+    EnableWindow(pmHwnd, TRUE);
+    SetActiveWindow(pmHwnd);
+
+    if (res.cancel || res.sel < 0 || res.sel >= (int)g_rmpEntries.size())
+        return;
+
+    const auto& chosen = g_rmpEntries[res.sel];
+    wstring full = chosen.second;
+    if (full.size() > 1 && full[1] != L':')            // not absolute
+        full = AppDir() + L"\\" + chosen.second;
+    wstring title = GetPluginFriendlyName(chosen.first);
+    if (title.empty()) title = chosen.first;
+    ShowReadmeReader(pmHwnd, title, full);
 }

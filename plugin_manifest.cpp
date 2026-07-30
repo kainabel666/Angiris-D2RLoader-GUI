@@ -58,6 +58,13 @@ struct DllKeyEqual {
 // mutated by EnsureManifestEntries, written by SavePluginManifest.
 std::unordered_map<wstring, wstring, DllKeyHash, DllKeyEqual> g_friendlyNames;
 
+// DLL filename → readme path (relative to the launcher folder, e.g.
+// "d2rloader\\readmes\\Warlock\\warlock-Readme.txt"). Stored in a PARALLEL
+// "readmes" object in the JSON rather than changing the "names" value type,
+// so old manifest files (which have only "names") still load unchanged —
+// they simply produce no readme entries. Added v1.6 for drag-drop install.
+std::unordered_map<wstring, wstring, DllKeyHash, DllKeyEqual> g_readmePaths;
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 // Unescape a JSON string literal body — same backslash table the rest
@@ -106,11 +113,13 @@ bool ParseString(const wstring& j, size_t& p, wstring& out) {
     return true;
 }
 
-// Walk forward from the opening `{` of the "names" object, collecting
-// "dll": "friendly" pairs into g_friendlyNames. Stops at the matching
-// `}`. Non-string values, bare numbers, and other malformed tokens
-// are skipped silently — the manifest must never crash the launcher.
-void ParseNamesObject(const wstring& j, size_t openBrace) {
+// Walk forward from the opening `{` of a string→string object, collecting
+// "key": "value" pairs into `target`. Stops at the matching `}`. Non-string
+// values, bare numbers, and other malformed tokens are skipped silently —
+// the manifest must never crash the launcher. Shared by the "names" and
+// "readmes" objects, which have the identical shape.
+void ParseStringObject(const wstring& j, size_t openBrace,
+        std::unordered_map<wstring, wstring, DllKeyHash, DllKeyEqual>& target) {
     size_t p = openBrace + 1;                     // skip `{`
     while (p < j.size()) {
         SkipWhitespace(j, p);
@@ -141,20 +150,19 @@ void ParseNamesObject(const wstring& j, size_t openBrace) {
             continue;
         }
 
-        // Empty values are valid and explicitly mean "no friendly
-        // name yet" — we KEEP the entry so save round-trips don't
-        // churn the file, and GetPluginFriendlyName treats an empty
-        // value the same as a missing entry. Drop only entries with
-        // empty KEYS (those are malformed).
+        // Empty values are valid and explicitly mean "no value yet" — we
+        // KEEP the entry so save round-trips don't churn the file. Callers
+        // treat an empty value the same as a missing entry. Drop only
+        // entries with empty KEYS (those are malformed).
         if (key.empty()) continue;
-        g_friendlyNames[key] = val;
+        target[key] = val;
     }
 }
 
-// Locate the start of the "names" object's `{` in a JSON file. Returns
+// Locate the start of a named object's `{` in a JSON file. Returns
 // wstring::npos if the key isn't found or isn't followed by an object.
-size_t FindNamesObjectStart(const wstring& j) {
-    const wstring needle = L"\"names\"";
+size_t FindObjectStart(const wstring& j, const wchar_t* keyName) {
+    wstring needle = wstring(L"\"") + keyName + L"\"";
     size_t p = j.find(needle);
     if (p == wstring::npos) return wstring::npos;
     p += needle.size();
@@ -170,6 +178,7 @@ size_t FindNamesObjectStart(const wstring& j) {
 
 void LoadPluginManifest() {
     g_friendlyNames.clear();
+    g_readmePaths.clear();
 
     // AppDir() returns the launcher folder without a trailing
     // backslash, so we add one before the filename or we'd end up
@@ -178,9 +187,16 @@ void LoadPluginManifest() {
     const wstring json = ReadTextFile(path);
     if (json.empty()) return;                 // file missing / empty
 
-    size_t openBrace = FindNamesObjectStart(json);
-    if (openBrace == wstring::npos) return;   // no "names" key
-    ParseNamesObject(json, openBrace);
+    // "names" (dll → friendly name) — the original v1.x object.
+    size_t namesBrace = FindObjectStart(json, L"names");
+    if (namesBrace != wstring::npos)
+        ParseStringObject(json, namesBrace, g_friendlyNames);
+
+    // "readmes" (dll → readme path) — added v1.6. Absent in old files,
+    // which simply produces no readme entries (all lookups return "").
+    size_t readmesBrace = FindObjectStart(json, L"readmes");
+    if (readmesBrace != wstring::npos)
+        ParseStringObject(json, readmesBrace, g_readmePaths);
 }
 
 wstring GetPluginFriendlyName(const wstring& dllName) {
@@ -199,6 +215,29 @@ void SetPluginFriendlyName(const wstring& dllName, const wstring& friendlyName) 
     // the friendly name without disturbing the JSON file's key
     // spelling.
     g_friendlyNames[dllName] = friendlyName;
+}
+
+wstring GetPluginReadmePath(const wstring& dllName) {
+    if (g_readmePaths.empty() || dllName.empty()) return L"";
+    auto it = g_readmePaths.find(dllName);
+    if (it == g_readmePaths.end()) return L"";
+    return it->second;       // may be empty ("no readme")
+}
+
+void SetPluginReadmePath(const wstring& dllName, const wstring& readmePath) {
+    if (dllName.empty()) return;
+    // Same case-insensitive update semantics as SetPluginFriendlyName.
+    // Pass an empty path to clear the readme link (entry kept for
+    // round-trip stability, lookup returns "").
+    g_readmePaths[dllName] = readmePath;
+}
+
+std::vector<std::pair<wstring, wstring>> GetAllPluginReadmes() {
+    std::vector<std::pair<wstring, wstring>> out;
+    out.reserve(g_readmePaths.size());
+    for (const auto& kv : g_readmePaths)
+        if (!kv.second.empty()) out.push_back(kv);
+    return out;
 }
 
 
@@ -267,18 +306,28 @@ bool DllLess(const wstring& a, const wstring& b) {
 } // namespace
 
 void SavePluginManifest() {
-    // Collect into a vector first so we can sort for stable output.
+    // Collect names into a vector first so we can sort for stable output.
     std::vector<std::pair<wstring, wstring>> entries;
     entries.reserve(g_friendlyNames.size());
     for (const auto& kv : g_friendlyNames) entries.push_back(kv);
     std::sort(entries.begin(), entries.end(),
               [](const auto& a, const auto& b) { return DllLess(a.first, b.first); });
 
-    // Pretty-print: top-level "names" object, one entry per line,
-    // two-space indent. Trailing commas omitted for strict-parser
-    // compatibility.
+    // Readme paths: only emit non-empty ones, sorted. If none exist, the
+    // "readmes" object is omitted entirely so files that never touched the
+    // drag-drop feature keep their original single-object shape.
+    std::vector<std::pair<wstring, wstring>> readmes;
+    for (const auto& kv : g_readmePaths)
+        if (!kv.second.empty()) readmes.push_back(kv);
+    std::sort(readmes.begin(), readmes.end(),
+              [](const auto& a, const auto& b) { return DllLess(a.first, b.first); });
+
+    // Pretty-print: top-level object holding "names" and (optionally)
+    // "readmes", one entry per line, two-space indent. Trailing commas
+    // omitted for strict-parser compatibility.
     wstring out;
     out += L"{\n";
+
     out += L"  \"names\": {";
     for (size_t i = 0; i < entries.size(); ++i) {
         out += L"\n    \"";
@@ -289,8 +338,22 @@ void SavePluginManifest() {
         if (i + 1 < entries.size()) out += L",";
     }
     if (!entries.empty()) out += L"\n  ";
-    out += L"}\n";
-    out += L"}\n";
+    out += L"}";
+
+    if (!readmes.empty()) {
+        out += L",\n  \"readmes\": {";
+        for (size_t i = 0; i < readmes.size(); ++i) {
+            out += L"\n    \"";
+            out += JsonEscape(readmes[i].first);
+            out += L"\": \"";
+            out += JsonEscape(readmes[i].second);
+            out += L"\"";
+            if (i + 1 < readmes.size()) out += L",";
+        }
+        out += L"\n  }";
+    }
+
+    out += L"\n}\n";
 
     // Same path construction as LoadPluginManifest — keep them in sync.
     WriteTextFile(AppDir() + L"\\plugin_manifest.json", out);

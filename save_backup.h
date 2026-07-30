@@ -4,11 +4,11 @@
 //
 //  Per-mod save folder snapshots. D2R writes each mod's character +
 //  stash data to
-//    %USERPROFILE%\Saved Games\Diablo II Resurrected\Mods\<savepath>\
+//    %USERPROFILE%\Saved Games\Diablo II Resurrected\Mods\<savepath>
 //  where <savepath> is the value of the "savepath" field in the
 //  mod's modinfo.json. A backup snapshot is a full copy of that
 //  folder into:
-//    <savefolder>\backups\<YYYY-MM-DD_HHMMSS>\
+//    <savefolder>\backups\<YYYY-MM-DD_HHMMSS>
 //  keeping the backups co-located with the data they protect.
 //
 //  Triggered manually (right-click context menu) and automatically
@@ -27,7 +27,7 @@
 #include "angiris_common.h"
 
 // Create a timestamped snapshot of the mod's save folder. The
-// folder is found at %USERPROFILE%\Saved Games\Diablo II Resurrected\
+// folder is found at %USERPROFILE%\Saved Games\Diablo II Resurrected
 // Mods\<savePath>. Returns true on success and writes the new
 // backup folder's absolute path into *outBackupDir (caller can use
 // for UI feedback). Returns false on:

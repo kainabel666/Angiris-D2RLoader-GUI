@@ -52,6 +52,8 @@
 struct PluginConfig {
     bool             present = false;
     vector<wstring>  plugins;          // dll filenames, in manifest order
+    wstring          author;           // optional "author" field (v1.6);
+                                       // empty if not provided
 };
 
 // Load the manifest for a given mod directory. `modDir` is the absolute
@@ -113,7 +115,7 @@ vector<bool> RunPluginRecoverySweep(const wstring& modD2rLoaderDir,
 // ─────────────────────────────────────────────────────────────────────
 //
 // Physically move every plugin/patch currently in
-// <d2rPath>\d2rloader\plugins\  and  <d2rPath>\d2rloader\patches\
+// <d2rPath>\d2rloader\plugins\  and  <d2rPath>\d2rloader\patches
 // into their respective Disabled\ subfolders. Called in two places:
 //
 //   1. When the Plugins window opens for a mod that has a manifest.

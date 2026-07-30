@@ -1,6 +1,65 @@
 ANGIRIS LAUNCHER — CHANGELOG
 ═══════════════════════════════════════════════════════════════════════
+ v1.6
+─────────────────────────────────────────────────────────────────────
+The big theme of this release is **installing plugins and patches by drag and
+drop, plus a pair of new in-launcher tools (Logs and Mods) that replace the
+old "open this folder in Explorer" buttons.
 
+ Drag-and-drop plugin & patch install
+
+- **Plugin zips.** Drop a plugin zip on the launcher and it installs itself.
+  A `plugin_info.json` manifest inside the zip routes each file to the right
+  place — plugins, config, patches, readmes, or a mod's excel folder. See
+  `plugin_info_GUIDE.md` for the manifest format.
+- **Drop scope.** Drop on the main window to install globally; drop on the
+  Plugin Manager to install into the selected mod.
+- **`destPath` for custom locations.** A manifest file can specify a literal
+  destination path (with a `{mod}` token) instead of a preset folder — for
+  JSON or data that needs to land somewhere specific. These paths are
+  sandboxed to the game folder (no `..`, no absolute paths, no drives).
+- **Bare `.json` patches.** Drop a patch JSON on its own — no manifest, no
+  zip required. It routes straight to the patches folder (global or per-mod
+  by where you drop it).
+- **Patch-bundle zips.** Drop a manifest-less zip containing one or more
+  JSON files; the launcher extracts just the JSONs to the patches folder.
+- **Overwrite protection.** If a file already exists you're prompted before
+  it's replaced, and the previous version is preserved as a `.old` backup
+  (config TOML, JSON, and excel TXT) so you can copy your settings back.
+- **Disabled-plugin aware.** If a plugin is installed but disabled, dropping
+  it again overwrites the disabled copy in place — it won't silently
+  re-enable itself or leave a duplicate behind.
+- **Mod-author allowlist.** A mod that ships a plugin manifest only accepts
+  the plugins/patches its author sanctioned; anything else is politely
+  declined with a notice.
+- **READMEs.** Plugins can ship a README, viewable from the Plugin Manager
+  (the READMEs button, or right-click a plugin → Open README).
+
+ New Logs tool
+
+- The **Logs** button now opens an in-launcher grid of your log files
+  instead of an Explorer window.
+- **Left-click a log to copy it to the clipboard** — then paste (Ctrl+V)
+  straight into Discord to attach it to a help request.
+
+ New Mods tool
+
+- The **Mods** button opens a grid of every mod folder, including folders
+  that don't yet have a `modinfo.json` (shown greyed with "No Mod Info").
+- **Click a mod to view its modinfo**, or to create one for a folder that's
+  missing it.
+- The **modinfo editor** lets you view and edit every modinfo field, with
+  `name` and `savepath` required. Changes are written back to
+  `modinfo.json` and reflected in the mod list immediately.
+
+ Fixes & polish
+
+- The **last-played mod** now floats to the top of the mod list, so it's
+  always visible without scrolling.
+- The **rename** dialog now pre-fills the plugin's existing friendly name.
+- Launcher modals no longer force themselves above every window on the
+  system — they stay above the launcher but let you switch to other apps
+  (e.g. an Explorer window) normally.
 
 V1.5.1
 ─────────────────────────────────────────────────────────────────────

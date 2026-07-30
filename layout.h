@@ -318,7 +318,7 @@ constexpr int TB_BTN_INSET_T = 30;     // tucked just under the top filigree
 // chrome total; SEED_ARROW_W = arrow button slice on the right.
 constexpr int SEED_CB_W    = 27;
 constexpr int SEED_CB_H    = 28;
-constexpr int SEED_COMBO_W = 160;     // total width of input + arrow
+constexpr int SEED_COMBO_W = 190;     // total width of input + arrow (widened +30 in v1.6 so "Enter Seed..." isn't clipped in Exocet at larger scales)
 constexpr int SEED_COMBO_H = 26;
 constexpr int SEED_ARROW_W = 24;      // arrow button slice on the right edge
 

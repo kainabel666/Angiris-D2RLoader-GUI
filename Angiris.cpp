@@ -83,6 +83,10 @@
 #include "mod_updates.h"
 #include "save_backup.h"
 #include "zip_install.h"
+#include "plugin_install.h"        // PeekZipKind, ZipKind
+#include "plugin_drop_ui.h"        // HandleMainWindowPluginDrop
+#include "logs_modal.h"           // ShowLogsModal (v1.6)
+#include "mods_modal.h"           // ShowModsModal (v1.6)
 #include "launcher_self_update.h"
 #include "assets.h"
 #include "fonts.h"
@@ -2150,15 +2154,11 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 
         // ── Left rail nav (hyperlink-style: opens external paths/files) ──
         if (id == IDC_NAV_MODS) {
-            wstring p = g_cfg.d2rPath + L"\\mods";
-            CreateDirectoryW(p.c_str(), nullptr);
-            ShellExecute(hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            ShowModsModal(hw);
             return 0;
         }
         else if (id == IDC_NAV_LOGS) {
-            wstring p = g_cfg.d2rPath + L"\\logs";
-            CreateDirectoryW(p.c_str(), nullptr);
-            ShellExecute(hw, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            ShowLogsModal(hw);
             return 0;
         }
         else if (id == IDC_NAV_HELP) {
@@ -2668,22 +2668,51 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DROPFILES: {
         // User dropped one or more files onto the launcher. Pull the paths,
-        // filter to .zip, enqueue for the install worker. Non-zip files
-        // are silently ignored (drag-and-drop is a low-friction action; a
-        // popup for "this isn't a zip" would feel scoldy). The worker
-        // thread reports back via MSG_ZIP_CONFLICT_DIALOG (per-zip
-        // collision question) and MSG_ZIP_QUEUE_DONE (queue drained).
+        // filter to .zip, then route each by KIND: a zip with modinfo.json
+        // is a MOD (existing installer); one with plugin_info.json is a
+        // PLUGIN (v1.6 installer). Bare zips (neither) fall through to the
+        // mod installer, which surfaces the "no modinfo.json" error — a
+        // bare main-window drop has always meant "mod install".
+        //
+        // Plugin drops from the MAIN window are GLOBAL scope. (The plugin
+        // manager has its own drop handler for mod-scoped plugin installs.)
         HDROP hDrop = (HDROP)wp;
         UINT n = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
-        vector<wstring> paths;
-        paths.reserve(n);
+        vector<wstring> allPaths;
+        allPaths.reserve(n);
         for (UINT i = 0; i < n; ++i) {
             wchar_t p[MAX_PATH * 2];
             UINT len = DragQueryFileW(hDrop, i, p, MAX_PATH * 2);
-            if (len > 0) paths.emplace_back(p);
+            if (len > 0) allPaths.emplace_back(p);
         }
         DragFinish(hDrop);
-        EnqueueZipsForInstall(paths);
+
+        // Split into mod-bound and plugin-bound by peeking each zip.
+        vector<wstring> modZips;
+        for (const wstring& path : allPaths) {
+            size_t dot = path.find_last_of(L'.');
+            if (dot == wstring::npos) continue;
+            wstring ext = path.substr(dot);
+
+            // Bare .json → a patch, straight to the global patches folder.
+            if (_wcsicmp(ext.c_str(), L".json") == 0) {
+                HandleMainWindowPatchDrop(hw, path);
+                continue;
+            }
+            if (_wcsicmp(ext.c_str(), L".zip") != 0)
+                continue;                       // other types: ignore silently
+
+            ZipKind kind = PeekZipKind(path);
+            if (kind == ZipKind::Plugin) {
+                HandleMainWindowPluginDrop(hw, path);   // global scope
+            } else if (kind == ZipKind::PatchBundle) {
+                HandleMainWindowPatchBundle(hw, path);  // json(s) → global patches
+            } else {
+                // Mod or Bare → existing installer (Bare yields its error).
+                modZips.push_back(path);
+            }
+        }
+        if (!modZips.empty()) EnqueueZipsForInstall(modZips);
         return 0;
     }
 

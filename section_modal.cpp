@@ -252,7 +252,7 @@ void ShowSectionModal(HWND parent, const wchar_t* title,
     int y = pr.top  + ((pr.bottom - pr.top ) - physH) / 2;
 
     g_smHwnd = CreateWindowExW(
-        WS_EX_TOPMOST,                    // frame_modbanner is the border
+        0,  // owned popup: stays above its owner (launcher) without pinning over other apps                    // frame_modbanner is the border
         L"AngirisSectionModal",
         g_smTitle,
         WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,

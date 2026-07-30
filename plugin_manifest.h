@@ -76,6 +76,25 @@ wstring GetPluginFriendlyName(const wstring& dllName);
 void SetPluginFriendlyName(const wstring& dllName, const wstring& friendlyName);
 
 
+// Returns the stored readme path for `dllName` (relative to the launcher
+// folder), or an empty string if none. Set when a plugin is installed via
+// drag-drop (v1.6) with a readme file. Case-insensitive on the DLL name.
+//
+// Stored in a parallel "readmes" object in plugin_manifest.json, so old
+// manifests without it simply return "" for every plugin.
+wstring GetPluginReadmePath(const wstring& dllName);
+
+// Record (or clear, with an empty path) the readme path for a DLL. Pass
+// the launcher-relative path to the stored <DLLName>-Readme file. Caller
+// is expected to call SavePluginManifest afterward. Case-insensitive.
+void SetPluginReadmePath(const wstring& dllName, const wstring& readmePath);
+
+// Enumerate every plugin that has a (non-empty) readme path. Returns
+// pairs of { dllName, readmePath }. Used by the plugin manager's READMEs
+// picker (v1.6). Order is unspecified — the caller sorts for display.
+std::vector<std::pair<wstring, wstring>> GetAllPluginReadmes();
+
+
 // For each filename in `dllNames`, if no entry currently exists in the
 // in-memory map (case-insensitive), add a new entry with an EMPTY
 // friendly name. Existing entries are never touched — neither their

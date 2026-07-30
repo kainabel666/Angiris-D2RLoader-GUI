@@ -12,7 +12,7 @@
   "backup_count":         1,
   "backup_saves":         true,
   "backup_saves_prompted": false,
-  "ui_scale":             0.750,
+  "ui_scale":             1.000,
   "font_name":            "Exocet-Blizzard-Medium",
   "font_color":           -1,
   "skipped_launcher_version": "",

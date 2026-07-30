@@ -5,6 +5,7 @@
 #include "mod_scan.h"
 #include "core.h"     // ReadTextFile, JsonStr, g_hwMain
 #include "config.h"   // g_cfg.d2rPath
+#include "playtime.h" // g_playtimes (float last-played mod to top)
 
 // Live mod list + selection index. Definitions live here; declarations
 // in the header so paint/UI code in Angiris.cpp and other modules read
@@ -111,6 +112,30 @@ vector<ModInfo> FindMods(const wstring& d2rPath) {
             FindClose(h2);
         }
     }
+    // Float the most-recently-played mod to the top. The list is otherwise
+    // alphabetical; surfacing the last-played mod means it's always visible
+    // without scrolling (previously, if it sorted below the visible window,
+    // the highlighted selection wasn't even on screen until you scrolled).
+    // Playtime is keyed by folder name in g_playtimes; pick the entry with
+    // the newest non-zero lastPlayed and rotate it to index 0, preserving
+    // the alphabetical order of the rest.
+    {
+        size_t bestIdx = out.size();
+        time_t bestTime = 0;
+        for (size_t i = 0; i < out.size(); ++i) {
+            auto it = g_playtimes.find(out[i].folder);
+            if (it != g_playtimes.end() && it->second.lastPlayed > bestTime) {
+                bestTime = it->second.lastPlayed;
+                bestIdx  = i;
+            }
+        }
+        if (bestIdx < out.size() && bestIdx != 0) {
+            ModInfo last = out[bestIdx];
+            out.erase(out.begin() + bestIdx);
+            out.insert(out.begin(), last);
+        }
+    }
+
     return out;
 }
 

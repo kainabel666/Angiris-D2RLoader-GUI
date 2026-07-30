@@ -91,7 +91,7 @@ REM           OPDrawBtnFrame, PaintTopOrnament, PaintCornerAccents)
 REM           extracted to paint_helpers.cpp
 REM v1.3-A: new plugin_config.cpp (per-mod plugin_config.json loader,
 REM         no UI changes yet -- Phase A of the manifest feature)
-REM v1.3-E1: new plugin_manifest.cpp (launcher-wide DLL friendly name
+REM v1.3-E1: new plugin_manifest.cpp plugin_install.cpp plugin_drop_ui.cpp readme_reader.cpp logs_modal.cpp mods_modal.cpp (launcher-wide DLL friendly name
 REM         lookup loaded from plugin_manifest.json beside the exe)
 REM Phase 7c: big paint functions (PaintBody, PaintLeftRail, PaintModDescription,
 REM           PaintLaunchOptions, PaintBottomPanel, PaintToolbarControl)
@@ -113,7 +113,7 @@ REM The g++ invocation below lists each source file directly.)
 REM Single source of truth for the compile list. Add or remove a file
 REM once here and it flows to the sanity check, the display, and the
 REM g++ invocation. (Previously three separate lists — always drifted.)
-set "SOURCES=Angiris.cpp core.cpp version.cpp config_editor.cpp http.cpp config.cpp update_cache.cpp playtime.cpp seeds.cpp mod_scan.cpp launch_flags.cpp mod_config.cpp tool_resolver.cpp fs_utils.cpp mod_updates.cpp save_backup.cpp zip_install.cpp launcher_self_update.cpp assets.cpp fonts.cpp layout.cpp scaling.cpp colors.cpp hover_tip.cpp mod_list.cpp plugin_manager.cpp plugin_config.cpp plugin_manifest.cpp loader_options_modal.cpp section_modal.cpp help_modal.cpp about_modal.cpp d2rloader_update.cpp dialogs.cpp buttons.cpp paint_helpers.cpp paint_main.cpp"
+set "SOURCES=Angiris.cpp core.cpp version.cpp config_editor.cpp http.cpp config.cpp update_cache.cpp playtime.cpp seeds.cpp mod_scan.cpp launch_flags.cpp mod_config.cpp tool_resolver.cpp fs_utils.cpp mod_updates.cpp save_backup.cpp zip_install.cpp launcher_self_update.cpp assets.cpp fonts.cpp layout.cpp scaling.cpp colors.cpp hover_tip.cpp mod_list.cpp plugin_manager.cpp plugin_config.cpp plugin_manifest.cpp plugin_install.cpp plugin_drop_ui.cpp readme_reader.cpp logs_modal.cpp mods_modal.cpp loader_options_modal.cpp section_modal.cpp help_modal.cpp about_modal.cpp d2rloader_update.cpp dialogs.cpp buttons.cpp paint_helpers.cpp paint_main.cpp"
 
 REM Sanity check: every listed source file must exist on disk.
 for %%S in (%SOURCES%) do (

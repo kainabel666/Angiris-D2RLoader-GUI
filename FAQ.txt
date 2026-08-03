@@ -287,6 +287,8 @@ A: Even easier - just drop the patch's .json file straight onto the launcher
    manifest needed. You can also drop a zip that contains one or more .json
    patches and the launcher will extract just the JSON files to the patches
    folder. Existing patches prompt before overwriting and keep a .old backup.
+   If you do want a manifest in a patch bundle (to ship a readme alongside
+   it, say), you can name it plugin_info.json OR patch_info.json - both work.
 
 Q: I re-installed a plugin I had disabled and now it's... still disabled?
 A: That's intended (v1.6). If a plugin is installed but toggled off (sitting

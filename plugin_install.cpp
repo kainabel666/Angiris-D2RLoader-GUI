@@ -11,6 +11,7 @@
                               // GetPluginFriendlyName (collision check via known dlls)
 
 #include <algorithm>
+#include <string>
 
 using std::wstring;
 using std::vector;
@@ -128,15 +129,26 @@ wstring ValidateDestPath(const wstring& raw) {
 }
 
 // Does a (validated) destPath contain the {mod} token?
+// Does a (validated) destPath contain a token that needs a mod chosen?
+// {mod} → the mod folder name; {mpq} → the mod's "<mod>.mpq" folder. Either
+// pulls the path into a mod's tree, so both require a target mod.
 bool DestPathNeedsMod(const wstring& p) {
-    return p.find(L"{mod}") != wstring::npos;
+    return p.find(L"{mod}") != wstring::npos
+        || p.find(L"{mpq}") != wstring::npos;
 }
 
-// Substitute {mod} with a sanitized mod folder name.
+// Substitute the mod tokens in a destPath template:
+//   {mod} → sanitized mod folder name
+//   {mpq} → "<mod>.mpq" (the mod's mpq folder, named after the mod)
+// Both use the same sanitized name, so {mpq} stays correct for any mod
+// without the author hardcoding the ".mpq" folder name.
 wstring SubstituteMod(const wstring& tmpl, const wstring& modName) {
     wstring mod = SanitizeName(modName);
+    wstring mpq = mod + L".mpq";
     wstring out = tmpl;
     size_t pos;
+    while ((pos = out.find(L"{mpq}")) != wstring::npos)
+        out.replace(pos, 5, mpq);
     while ((pos = out.find(L"{mod}")) != wstring::npos)
         out.replace(pos, 5, mod);
     return out;
@@ -248,8 +260,19 @@ bool ParseFilesArray(const wstring& j, vector<RawFileEntry>& out) {
         if (j[p] == L',') { ++p; continue; }
         if (j[p] != L'{') { ++p; continue; } // resync
 
-        // Parse one object: collect "path" and "dest".
-        size_t objEnd = j.find(L'}', p);
+        // Find this object's REAL closing brace. A naive find('}') breaks
+        // when a string VALUE contains braces — e.g. destPath "{mod}/{mpq}/…"
+        // whose first '}' (closing {mod}) would be mistaken for the object
+        // end, truncating the object and dropping later fields. So scan and
+        // skip any '}' that sits inside a double-quoted string.
+        size_t objEnd = wstring::npos;
+        bool inStr = false;
+        for (size_t k = p; k < j.size(); ++k) {
+            wchar_t c = j[k];
+            if (c == L'"' && (k == 0 || j[k - 1] != L'\\'))
+                inStr = !inStr;
+            else if (c == L'}' && !inStr) { objEnd = k; break; }
+        }
         if (objEnd == wstring::npos) break;
         wstring obj = j.substr(p, objEnd - p + 1);
         RawFileEntry e;
@@ -262,12 +285,16 @@ bool ParseFilesArray(const wstring& j, vector<RawFileEntry>& out) {
     return true;
 }
 
-// Locate plugin_info.json in the extracted tree (root, or one level deep —
-// zips often nest a single folder). Shallowest wins. Empty if none.
+// Locate the manifest in the extracted tree (root, or one level deep — zips
+// often nest a single folder). Accepts plugin_info.json OR patch_info.json
+// (the natural name for patch bundles); plugin_info wins if both exist at
+// the same level. Shallowest level wins. Empty if none.
 wstring FindPluginInfo(const wstring& root) {
-    // Check root first.
+    // Check root first — plugin_info takes precedence over patch_info.
     wstring atRoot = root + L"\\plugin_info.json";
     if (ZI_FileExists(atRoot)) return atRoot;
+    wstring atRootPatch = root + L"\\patch_info.json";
+    if (ZI_FileExists(atRootPatch)) return atRootPatch;
 
     // One level deep.
     WIN32_FIND_DATAW fd;
@@ -279,8 +306,11 @@ wstring FindPluginInfo(const wstring& root) {
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
         if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
             continue;
-        wstring cand = root + L"\\" + fd.cFileName + L"\\plugin_info.json";
+        wstring dir = root + L"\\" + fd.cFileName;
+        wstring cand = dir + L"\\plugin_info.json";
         if (ZI_FileExists(cand)) { found = cand; break; }
+        wstring candPatch = dir + L"\\patch_info.json";
+        if (ZI_FileExists(candPatch)) { found = candPatch; break; }
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     return found;
@@ -459,28 +489,36 @@ PluginInstallPlan InspectPluginZip(const wstring& zipPath,
         PluginFileOp op;
         op.dest = DestFromString(e.dest);
         op.srcTempPath = FindExtractedFile(manifestRoot, e.path);
+
         if (op.srcTempPath.empty()) continue;   // listed but not present — skip
 
-        wstring ext = ExtLower(e.path);
-        op.isDll    = (ext == L".dll");
-
-        // destPath OVERRIDES dest (per design). A validated literal path
-        // from the D2R root, sandboxed by ValidateDestPath. Rejected paths
-        // (traversal, absolute, drive) skip the file rather than falling
-        // back to dest — a bad destPath is an authoring error to surface,
-        // not silently reroute.
+        // destPath OVERRIDES dest (per design). A validated literal path,
+        // sandboxed by ValidateDestPath. Rejected paths (traversal, absolute,
+        // drive) skip the file rather than falling back to dest.
+        //
+        // A PLAIN destPath (no {mod}/{mpq} token) is SCOPE-RELATIVE: it
+        // follows the drop location. Dropped globally it resolves under the
+        // D2R root; dropped on a mod (plugin manager) it resolves under that
+        // mod's folder. This lets one manifest work either way — e.g.
+        // "d2rloader/Lua/scripts/x.json" lands globally OR inside the mod.
+        //
+        // A destPath WITH {mod}/{mpq} is explicitly mod-targeted and always
+        // needs a chosen mod (picker on a global drop).
         if (!e.destPath.empty()) {
             wstring validated = ValidateDestPath(e.destPath);
             if (validated.empty()) continue;    // unsafe/invalid — skip
             op.dest = PluginDest::Literal;
             op.literalTemplate = validated;
             if (DestPathNeedsMod(validated)) {
+                // Explicit {mod}/{mpq} — resolve after a mod is chosen.
                 op.needsMod = true;
                 plan.needsModPicker = true;
-                // destAbsPath resolved after the mod picker (see
-                // ResolveModDependentPaths). Left empty for now.
+            } else if (scope == InstallScope::Mod) {
+                // Scope-relative, mod drop → under the selected mod's folder.
+                wstring mod = SanitizeName(selectedMod);
+                op.destAbsPath = d2rPath + L"\\mods\\" + mod + L"\\" + validated;
             } else {
-                // Resolve immediately against the D2R root.
+                // Scope-relative, global drop → under the D2R root.
                 op.destAbsPath = d2rPath + L"\\" + validated;
             }
             plan.files.push_back(op);
@@ -601,9 +639,18 @@ bool ResolveExcelTargetMod(PluginInstallPlan& plan,
         if (op.isExcel) {
             op.destAbsPath = excelDir + L"\\" + BaseName(op.srcTempPath);
         } else if (op.needsMod && op.dest == PluginDest::Literal) {
-            // Literal destPath containing {mod} — substitute the chosen mod
-            // and resolve against the D2R root. Sandbox was already applied
-            // in ValidateDestPath; SubstituteMod sanitizes the mod name.
+            // Literal destPath containing {mod}/{mpq} — substitute and
+            // resolve against the D2R root. Sandbox already applied in
+            // ValidateDestPath; SubstituteMod sanitizes the mod name and
+            // expands {mpq} → "<mod>.mpq".
+            bool usesMpq = op.literalTemplate.find(L"{mpq}") != wstring::npos;
+            if (usesMpq && packed) {
+                // Target is inside a packed (encrypted) .mpq — can't write
+                // there. Skip this file and flag so the caller warns.
+                op.destAbsPath.clear();
+                plan.mpqLiteralPacked = true;
+                continue;
+            }
             wstring resolved = SubstituteMod(op.literalTemplate, mod);
             op.destAbsPath = d2rPath + L"\\" + resolved;
         }
@@ -895,6 +942,11 @@ bool HandlePluginDropZip(const wstring& zipPath,
         bool writable = ResolveExcelTargetMod(plan, d2rPath, chosenMod);
         if (plan.excelFilesPresent && !writable && cb.encryptedMpqNotice) {
             // Packed .mpq — excel files were redirected to mods/<mod>/.
+            cb.encryptedMpqNotice(cb.ctx, chosenMod);
+        }
+        if (plan.mpqLiteralPacked && cb.encryptedMpqNotice) {
+            // A {mpq} destPath targeted a packed .mpq — those files were
+            // skipped (can't write inside an encrypted mpq).
             cb.encryptedMpqNotice(cb.ctx, chosenMod);
         }
     }

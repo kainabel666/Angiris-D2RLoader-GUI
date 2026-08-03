@@ -4,24 +4,67 @@
 //
 //  Bridges the UI-agnostic routing core (plugin_install.cpp) to the
 //  launcher's windows: supplies the prompt callbacks (no-manifest notice,
-//  excel mod picker, encrypted-mpq notice, overwrite choice, error) and
-//  the entry points the WM_DROPFILES handlers call.
+//  mod picker, encrypted-mpq notice, overwrite choice, error) and the
+//  entry points the WM_DROPFILES handlers call.
 //
-//  Prompt dialogs here are FUNCTIONAL but not yet fully themed to match
-//  ShowConflictDialog — theming is a follow-up polish pass. They use a
-//  compact custom modal (overwrite) and a dropdown picker (excel).
+//  The overwrite prompt and mod picker are themed to match the launcher's
+//  other modals: stone background, gold title, and MkStdBtn buttons.
 
 #include "plugin_install.h"
-#include "core.h"          // g_hInst
+#include "core.h"          // g_hInst, g_scale
 #include "config.h"        // g_cfg
 #include "mod_scan.h"      // g_mods, ModInfo
 #include "plugin_config.h" // LoadPluginConfig, PluginConfig (allowlist)
 #include "plugin_drop_ui.h"
+#include "colors.h"        // Tok::Gold
+#include "fonts.h"         // g_fModName, g_fNavSm
+#include "assets.h"        // AssetImage, DrawButton9Slice
+#include "buttons.h"       // MkStdBtn, PaintOwnerDrawButton, ButtonKind
+#include "scaling.h"       // S()
 
 #include <windows.h>
 
+using namespace Gdiplus;
 using std::wstring;
 using std::vector;
+
+// Shared themed-modal paint: tiles bg_stone across the whole client, draws
+// the frame, and renders a centered gold title. Used by both prompts so
+// they match the launcher's other modals.
+static void PaintThemedPromptBg(HDC memDC, int W, int H, const wstring& title) {
+    Graphics g(memDC);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+    if (Gdiplus::Bitmap* stone = AssetImage(L"bg_stone.png")) {
+        int sw = (int)stone->GetWidth(), sh = (int)stone->GetHeight();
+        for (int yy = 0; yy < H; yy += sh)
+            for (int xx = 0; xx < W; xx += sw)
+                g.DrawImage(stone, xx, yy, sw, sh);
+    } else { SolidBrush b(Color(28, 24, 20)); g.FillRectangle(&b, 0, 0, W, H); }
+    if (Gdiplus::Bitmap* frame = AssetImage(L"frame_modbanner.png"))
+        DrawButton9Slice(g, frame, 0, 0, W, H, 24);
+    if (!title.empty()) {
+        SolidBrush gold(Tok::Gold);
+        StringFormat sfC; sfC.SetAlignment(StringAlignmentCenter);
+        sfC.SetLineAlignment(StringAlignmentCenter);
+        Gdiplus::Font* tf = g_fModName ? g_fModName : g_fNavSm;
+        if (tf) g.DrawString(title.c_str(), -1, tf,
+            RectF((REAL)0, (REAL)S(14), (REAL)W, (REAL)S(34)), &sfC, &gold);
+    }
+}
+
+// Draw wrapped body text (pale gold) in a themed prompt, below the title.
+static void PaintThemedPromptBody(HDC memDC, int W, int topY, int h,
+                                  const wstring& body) {
+    Graphics g(memDC);
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+    SolidBrush txt(Color(0xD8, 0xC7, 0xA0));
+    StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
+    sf.SetLineAlignment(StringAlignmentNear);
+    Gdiplus::Font* bf = g_fNavSm;
+    if (bf) g.DrawString(body.c_str(), -1, bf,
+        RectF((REAL)S(24), (REAL)topY, (REAL)(W - 2 * S(24)), (REAL)h), &sf, &txt);
+}
 
 // ─────────────────────────────────────────────────────────────────────
 //  Overwrite dialog — DLL Only / Config Only / DLL and Config / Cancel
@@ -43,6 +86,25 @@ enum {
 };
 
 LRESULT CALLBACK OverwriteProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hw, &ps);
+        RECT rc; GetClientRect(hw, &rc);
+        int W = rc.right, H = rc.bottom;
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBM = CreateCompatibleBitmap(hdc, W, H);
+        HBITMAP oldBM = (HBITMAP)SelectObject(memDC, memBM);
+        PaintThemedPromptBg(memDC, W, H, L"Plugin already exists");
+        auto* body = (wstring*)GetPropW(hw, L"owBody");
+        if (body) PaintThemedPromptBody(memDC, W, S(56), S(84), *body);
+        BitBlt(hdc, 0, 0, W, H, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBM); DeleteObject(memBM); DeleteDC(memDC);
+        EndPaint(hw, &ps);
+        return 0;
+    }
+    if (msg == WM_DRAWITEM) {
+        if (PaintOwnerDrawButton((DRAWITEMSTRUCT*)lp)) return TRUE;
+    }
     if (msg == WM_COMMAND) {
         auto* r = (OverwriteResult*)GetWindowLongPtrW(hw, GWLP_USERDATA);
         WORD id = LOWORD(wp);
@@ -78,58 +140,58 @@ OverwriteChoice ShowOverwriteDialog(HWND parent, bool hasConfig,
         wc.hInstance     = g_hInst;
         wc.lpszClassName = L"AngirisOverwriteDlg";
         wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        wc.hbrBackground = nullptr;
         RegisterClassExW(&wc);
         reg = true;
     }
 
-    int w = 420, h = hasConfig ? 190 : 160;
+    int w = (int)(560 * g_scale);
+    int h = (int)((hasConfig ? 300 : 260) * g_scale);
     RECT pr; GetWindowRect(parent, &pr);
     int x = pr.left + ((pr.right - pr.left) - w) / 2;
     int y = pr.top  + ((pr.bottom - pr.top) - h) / 2;
 
     OverwriteResult res;
-    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
+    HWND dlg = CreateWindowExW(0,   // owned popup stays above owner only
         L"AngirisOverwriteDlg", L"Plugin already exists",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
         x, y, w, h, parent, nullptr, g_hInst, nullptr);
     if (!dlg) return OverwriteChoice::Cancel;
     SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)&res);
 
-    wstring msg = L"Plugin already exists:\n" + pluginName;
-    CreateWindowExW(0, L"STATIC", msg.c_str(),
-        WS_CHILD | WS_VISIBLE, 16, 12, w - 32, 40, dlg, nullptr, g_hInst, nullptr);
+    wstring body = pluginName + L"\nis already installed. What would you like to overwrite?";
+    SetPropW(dlg, L"owBody", (HANDLE)&body);
 
-    int by = hasConfig ? 62 : 70;
+    int bw = (int)(150 * g_scale), bh = (int)(56 * g_scale);
+    int gap = (int)(14 * g_scale);
     if (hasConfig) {
-        CreateWindowExW(0, L"BUTTON", L"DLL Only",
-            WS_CHILD | WS_VISIBLE, 16, by, 120, 28,
-            dlg, (HMENU)OW_DLL_ONLY, g_hInst, nullptr);
-        CreateWindowExW(0, L"BUTTON", L"Config Only",
-            WS_CHILD | WS_VISIBLE, 146, by, 120, 28,
-            dlg, (HMENU)OW_CONFIG, g_hInst, nullptr);
-        CreateWindowExW(0, L"BUTTON", L"DLL and Config",
-            WS_CHILD | WS_VISIBLE, 276, by, 128, 28,
-            dlg, (HMENU)OW_BOTH, g_hInst, nullptr);
-        CreateWindowExW(0, L"BUTTON", L"Cancel",
-            WS_CHILD | WS_VISIBLE, 146, by + 40, 120, 28,
-            dlg, (HMENU)OW_CANCEL, g_hInst, nullptr);
+        // Three across, centered, then Cancel below.
+        int rowW = bw * 3 + gap * 2;
+        int rowX = (w - rowW) / 2;
+        int by = (int)(150 * g_scale);
+        MkStdBtn(dlg, L"DLL Only", OW_DLL_ONLY, rowX, by, bw, bh, true, ButtonKind::Plugins);
+        MkStdBtn(dlg, L"Config Only", OW_CONFIG, rowX + bw + gap, by, bw, bh, true, ButtonKind::Plugins);
+        MkStdBtn(dlg, L"DLL + Config", OW_BOTH, rowX + 2*(bw+gap), by, bw, bh, true, ButtonKind::Plugins);
+        MkStdBtn(dlg, L"Cancel", OW_CANCEL, (w - bw)/2, by + bh + gap, bw, bh, true, ButtonKind::Plugins);
     } else {
-        CreateWindowExW(0, L"BUTTON", L"Yes",
-            WS_CHILD | WS_VISIBLE, 90, by, 100, 30,
-            dlg, (HMENU)OW_YES, g_hInst, nullptr);
-        CreateWindowExW(0, L"BUTTON", L"No",
-            WS_CHILD | WS_VISIBLE, 220, by, 100, 30,
-            dlg, (HMENU)OW_CANCEL, g_hInst, nullptr);
+        // Yes / No, two across, centered.
+        int rowW = bw * 2 + gap;
+        int rowX = (w - rowW) / 2;
+        int by = (int)(158 * g_scale);
+        MkStdBtn(dlg, L"Yes", OW_YES, rowX, by, bw, bh, true, ButtonKind::Plugins);
+        MkStdBtn(dlg, L"No", OW_CANCEL, rowX + bw + gap, by, bw, bh, true, ButtonKind::Plugins);
     }
 
     EnableWindow(parent, FALSE);
+    ShowWindow(dlg, SW_SHOW);
+    UpdateWindow(dlg);
     MSG m;
     while (!res.done && GetMessageW(&m, nullptr, 0, 0)) {
         if (IsDialogMessageW(dlg, &m)) continue;
         TranslateMessage(&m);
         DispatchMessageW(&m);
     }
+    RemovePropW(dlg, L"owBody");
     EnableWindow(parent, TRUE);
     SetActiveWindow(parent);
     return res.choice;
@@ -144,6 +206,26 @@ struct ExcelPickResult { wstring mod; bool done = false; bool cancel = false; };
 enum { EX_COMBO = 200, EX_OK = 201, EX_CANCEL = 202 };
 
 LRESULT CALLBACK ExcelPickProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_ERASEBKGND) return 1;
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hw, &ps);
+        RECT rc; GetClientRect(hw, &rc);
+        int W = rc.right, H = rc.bottom;
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBM = CreateCompatibleBitmap(hdc, W, H);
+        HBITMAP oldBM = (HBITMAP)SelectObject(memDC, memBM);
+        PaintThemedPromptBg(memDC, W, H, L"Which mod?");
+        PaintThemedPromptBody(memDC, W, S(54), S(90),
+            L"This global plugin contains mod-local file(s). "
+            L"Which mod should they be installed into?");
+        BitBlt(hdc, 0, 0, W, H, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBM); DeleteObject(memBM); DeleteDC(memDC);
+        EndPaint(hw, &ps);
+        return 0;
+    }
+    if (msg == WM_DRAWITEM) {
+        if (PaintOwnerDrawButton((DRAWITEMSTRUCT*)lp)) return TRUE;
+    }
     if (msg == WM_COMMAND) {
         auto* r = (ExcelPickResult*)GetWindowLongPtrW(hw, GWLP_USERDATA);
         WORD id = LOWORD(wp);
@@ -180,44 +262,51 @@ wstring ShowExcelModPicker(HWND parent, const vector<wstring>& mods) {
         wc.hInstance     = g_hInst;
         wc.lpszClassName = L"AngirisExcelPickDlg";
         wc.hCursor       = LoadCursor(nullptr, IDC_ARROW);
-        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        wc.hbrBackground = nullptr;
         RegisterClassExW(&wc);
         reg = true;
     }
 
-    int w = 460, h = 200;
+    int w = (int)(560 * g_scale), h = (int)(300 * g_scale);
     RECT pr; GetWindowRect(parent, &pr);
     int x = pr.left + ((pr.right - pr.left) - w) / 2;
     int y = pr.top  + ((pr.bottom - pr.top) - h) / 2;
 
     ExcelPickResult res;
-    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME,  // topmost dropped: owned popup stays above owner only
-        L"AngirisExcelPickDlg", L"Which mod's Excel folder?",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+    HWND dlg = CreateWindowExW(0,   // owned popup stays above owner only
+        L"AngirisExcelPickDlg", L"Which mod?",
+        WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
         x, y, w, h, parent, nullptr, g_hInst, nullptr);
     if (!dlg) return L"";
     SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)&res);
 
-    CreateWindowExW(0, L"STATIC",
-        L"This Global Plugin contains a TXT file. Which MOD's Excel "
-        L"folder should this be added to?",
-        WS_CHILD | WS_VISIBLE, 16, 12, w - 32, 44, dlg, nullptr, g_hInst, nullptr);
-
+    int pad = (int)(28 * g_scale);
     HWND combo = CreateWindowExW(0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-        16, 64, w - 32, 200, dlg, (HMENU)EX_COMBO, g_hInst, nullptr);
+        pad, (int)(150 * g_scale), w - 2 * pad, (int)(240 * g_scale),
+        dlg, (HMENU)EX_COMBO, g_hInst, nullptr);
+    if (g_fNavSm) {
+        // Give the combobox the launcher's UI font for consistency.
+        static HFONT s_comboFont = CreateFontW(-(int)(16 * g_scale), 0, 0, 0,
+            FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        SendMessageW(combo, WM_SETFONT, (WPARAM)s_comboFont, TRUE);
+    }
     for (const wstring& m : mods)
         SendMessageW(combo, CB_ADDSTRING, 0, (LPARAM)m.c_str());
     if (!mods.empty()) SendMessageW(combo, CB_SETCURSEL, 0, 0);
 
-    CreateWindowExW(0, L"BUTTON", L"OK",
-        WS_CHILD | WS_VISIBLE, w - 210, 118, 90, 30,
-        dlg, (HMENU)EX_OK, g_hInst, nullptr);
-    CreateWindowExW(0, L"BUTTON", L"Cancel",
-        WS_CHILD | WS_VISIBLE, w - 110, 118, 90, 30,
-        dlg, (HMENU)EX_CANCEL, g_hInst, nullptr);
+    int bw = (int)(150 * g_scale), bh = (int)(56 * g_scale);
+    int gap = (int)(14 * g_scale);
+    int rowW = bw * 2 + gap;
+    int rowX = (w - rowW) / 2;
+    int by = h - (int)(20 * g_scale) - bh;
+    MkStdBtn(dlg, L"OK", EX_OK, rowX, by, bw, bh, true, ButtonKind::Plugins);
+    MkStdBtn(dlg, L"Cancel", EX_CANCEL, rowX + bw + gap, by, bw, bh, true, ButtonKind::Plugins);
 
     EnableWindow(parent, FALSE);
+    ShowWindow(dlg, SW_SHOW);
+    UpdateWindow(dlg);
     MSG m;
     while (!res.done && GetMessageW(&m, nullptr, 0, 0)) {
         if (IsDialogMessageW(dlg, &m)) continue;

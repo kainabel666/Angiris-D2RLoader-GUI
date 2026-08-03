@@ -150,11 +150,12 @@ constexpr int RM_BTN_GAP   = 12;
 // file-static — only one rename modal can be active at a time and it
 // always nests inside the plugin manager's modal pump.
 static HWND    g_rmHwnd      = nullptr;
-static HWND    g_rmInput     = nullptr;  // hidden off-screen EDIT — keyboard capture only
+static HWND    g_rmInput     = nullptr;  // visible EDIT inside the box — real editing surface
 static HWND    g_rmOkBtn     = nullptr;
 static HWND    g_rmCancelBtn = nullptr;
 static wstring g_rmDllName;              // DLL being renamed (display only)
 static wstring g_rmText;                 // current input text (mirrored from g_rmInput)
+static HFONT   g_rmEditFont  = nullptr;  // font for the visible rename EDIT
 static wstring g_rmResult;               // captured friendly name on OK
 static bool    g_rmAccepted  = false;    // OK pressed (true) vs Cancel/Esc (false)
 static bool    g_rmClassReg  = false;
@@ -1241,6 +1242,17 @@ void ShowPluginManager(HWND parent,
 
 static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_CTLCOLOREDIT: {
+        // Style the visible rename EDIT to match the box interior: pale
+        // gold text on the dark shadow well, no repaint flicker (return a
+        // solid dark brush as the control background).
+        HDC dc = (HDC)wp;
+        SetTextColor(dc, RGB(0xF0, 0xDF, 0xB0));   // pale gold, ~Tok::GoldBright
+        SetBkColor(dc, RGB(0, 0, 0));               // matches the opaque interior
+        static HBRUSH s_rmBg = CreateSolidBrush(RGB(0, 0, 0));
+        return (LRESULT)s_rmBg;
+    }
+
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hw, &ps);
@@ -1346,46 +1358,11 @@ static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                     editH - 2 * shadowInset);
             }
 
-            // Input text — pale gold, left-aligned, vertically centered.
-            // Static caret drawn as a thin gold vertical bar at the end
-            // of whatever's been typed.
-            {
-                Gdiplus::Font* inputFont = g_fBtn ? g_fBtn : g_fNavSm;
-                int textPad = S(10);
-                Gdiplus::RectF textRect((REAL)(editX + textPad),
-                                        (REAL)editY,
-                                        (REAL)(editW - 2 * textPad),
-                                        (REAL)editH);
-                Gdiplus::SolidBrush textBr(Tok::GoldBright);
-                Gdiplus::StringFormat sfIn;
-                sfIn.SetAlignment(Gdiplus::StringAlignmentNear);
-                sfIn.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-                sfIn.SetFormatFlags(sfIn.GetFormatFlags()
-                                    | Gdiplus::StringFormatFlagsNoWrap);
-                if (inputFont && !g_rmText.empty()) {
-                    g.DrawString(g_rmText.c_str(), -1, inputFont,
-                                 textRect, &sfIn, &textBr);
-                }
-
-                // Caret: measure text width, draw a 2px vertical bar
-                // at the trailing edge. Empty input → caret at leftmost
-                // text position.
-                if (inputFont) {
-                    Gdiplus::REAL caretRelX = 0;
-                    if (!g_rmText.empty()) {
-                        Gdiplus::RectF bbox;
-                        g.MeasureString(g_rmText.c_str(), -1, inputFont,
-                                        Gdiplus::PointF(textRect.X, textRect.Y),
-                                        &sfIn, &bbox);
-                        caretRelX = bbox.Width;
-                    }
-                    int caretX = (int)(textRect.X + caretRelX);
-                    int caretTop = editY + S(6);
-                    int caretH = editH - S(12);
-                    g.FillRectangle(&textBr, caretX, caretTop,
-                                    S(2), caretH);
-                }
-            }
+            // The input text and caret are now rendered by a real, visible
+            // EDIT control positioned inside this box (see the setup code and
+            // WM_CTLCOLOREDIT). That gives native click-to-position, caret
+            // movement, selection, and mid-string editing. We only draw the
+            // box chrome + dark interior here; the EDIT draws the text.
         }
 
         BitBlt(hdc, 0, 0, W, H, memDC, 0, 0, SRCCOPY);
@@ -1407,24 +1384,13 @@ static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND: {
         WORD id   = LOWORD(wp);
         WORD code = HIWORD(wp);
-        // Hidden EDIT (id=10) is our keyboard-capture surface. Its
-        // EN_CHANGE fires whenever text changes; mirror into g_rmText
-        // so the paint pass shows the updated content.
+        // The visible EDIT (id=10) draws its own text now. We still mirror
+        // its content into g_rmText on change so the OK handler can read it.
+        // No InvalidateRect needed — the control repaints itself.
         if (id == 10 && code == EN_CHANGE) {
             wchar_t buf[1024] = {};
             GetWindowTextW(g_rmInput, buf, 1024);
             g_rmText = buf;
-            // Invalidate ONLY the input-text box, not the whole window.
-            // A full-window InvalidateRect repainted the owner-drawn OK /
-            // Cancel buttons on every keystroke, making them flicker. The
-            // edit rect mirrors the paint case's editX/Y/W/H computation.
-            RECT cr; GetClientRect(hw, &cr);
-            int editX = (int)(RM_PAD * g_dpiScale);
-            int editY = (int)((RM_TITLE_H + RM_LABEL_H + 8) * g_dpiScale);
-            int editW = cr.right - 2 * editX;
-            int editH = (int)(RM_EDIT_H * g_dpiScale);
-            RECT inputRc = { editX, editY, editX + editW, editY + editH };
-            InvalidateRect(hw, &inputRc, FALSE);
             return 0;
         }
         if (code == BN_CLICKED) {
@@ -1450,8 +1416,8 @@ static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_KEYDOWN:
         // Esc cancels. Enter → OK via IsDialogMessage's default-button
-        // handling. Character input + backspace go to the hidden EDIT
-        // natively (its EN_CHANGE mirrors into g_rmText).
+        // handling. Character input, backspace, arrows, and click-to-
+        // position are all handled natively by the visible EDIT.
         if (wp == VK_ESCAPE) {
             g_rmAccepted = false;
             DestroyWindow(hw);
@@ -1460,21 +1426,22 @@ static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
         break;
 
     case WM_LBUTTONDOWN:
-        // Keep focus on the hidden EDIT so typing continues to work
-        // after a click anywhere in the modal.
+        // A click on the modal BACKGROUND (not the EDIT) refocuses the
+        // input so typing resumes. Clicks inside the EDIT are handled by
+        // the control itself and position the caret.
         if (g_rmInput) SetFocus(g_rmInput);
         break;
 
     case WM_ACTIVATE:
-        // Restore focus to the hidden EDIT when the modal becomes
-        // active (e.g. bringing the launcher back from the background).
+        // Restore focus to the EDIT when the modal becomes active again
+        // (e.g. bringing the launcher back from the background).
         if (LOWORD(wp) != WA_INACTIVE && g_rmInput) {
             SetFocus(g_rmInput);
         }
         break;
 
     case WM_SETFOCUS:
-        // Forward any focus the modal receives to the hidden EDIT.
+        // Forward any focus the modal frame receives to the EDIT.
         if (g_rmInput) SetFocus(g_rmInput);
         return 0;
 
@@ -1493,6 +1460,7 @@ static LRESULT CALLBACK RenameProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
         g_rmInput     = nullptr;
         g_rmOkBtn     = nullptr;
         g_rmCancelBtn = nullptr;
+        if (g_rmEditFont) { DeleteObject(g_rmEditFont); g_rmEditFont = nullptr; }
         // Don't PostQuitMessage — that would propagate WM_QUIT to the
         // outer plugin manager pump (and the main app pump). The
         // ShowRenameModal pump checks g_rmHwnd and exits cleanly.
@@ -1556,24 +1524,53 @@ static bool ShowRenameModal(HWND parent,
     // negative coords in modal client space) so it's never visible;
     // its EN_CHANGE mirrors the buffer into g_rmText, which the paint
     // pass renders inside the black shadow well.
+    // The input is a REAL, visible EDIT sitting inside the text_box.png
+    // chrome. Using the native control (instead of hand-painting the text)
+    // gives click-to-position, caret movement, selection, and mid-string
+    // editing for free. It's placed to match the box interior the paint
+    // pass draws (editX/Y/W/H there use the same constants), inset to sit
+    // within the dark shadow well. Borderless — the box art is the border.
+    RECT rmClient; GetClientRect(g_rmHwnd, &rmClient);
+    int rmW      = rmClient.right;
+    int rmEditX  = (int)(RM_PAD * g_dpiScale);
+    int rmEditY  = (int)((RM_TITLE_H + RM_LABEL_H + 8) * g_dpiScale);
+    int rmEditW  = rmW - 2 * rmEditX;
+    int rmEditH  = (int)(RM_EDIT_H * g_dpiScale);
+    int rmInset  = (int)(4 * g_dpiScale) + (int)(6 * g_dpiScale); // shadow + text pad
+    int rmVInset = (int)(4 * g_dpiScale);
+    int inX = rmEditX + rmInset;
+    int inY = rmEditY + rmVInset;
+    int inW = rmEditW - 2 * rmInset;
+    int inH = rmEditH - 2 * rmVInset;
+
     g_rmInput = CreateWindowExW(0,
         L"EDIT", L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
-        -100, -100, 1, 1,
+        inX, inY, inW, inH,
         g_rmHwnd, (HMENU)(UINT_PTR)10, g_hInst, nullptr);
     if (g_rmInput) {
+        // Match the themed reader font, sized to the box height.
+        if (!g_rmEditFont) {
+            int fontPx = inH - (int)(8 * g_dpiScale);
+            if (fontPx < (int)(12 * g_dpiScale)) fontPx = (int)(12 * g_dpiScale);
+            g_rmEditFont = CreateFontW(-fontPx, 0, 0, 0, FW_NORMAL,
+                FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH,
+                L"Segoe UI");
+        }
+        if (g_rmEditFont)
+            SendMessage(g_rmInput, WM_SETFONT, (WPARAM)g_rmEditFont, TRUE);
         SendMessage(g_rmInput, EM_LIMITTEXT, 512, 0);
-        // Set the initial text AFTER g_rmInput is assigned. Creating the
-        // EDIT with initial text fires EN_CHANGE during CreateWindowExW —
-        // at which point g_rmInput isn't assigned yet, so the EN_CHANGE
-        // handler reads a stale handle and wipes g_rmText. Setting it here
-        // fires EN_CHANGE with g_rmInput valid, correctly mirroring the
-        // pre-populated friendly name into g_rmText for the paint pass.
+        // Set the initial text AFTER g_rmInput is assigned (creating the
+        // EDIT with initial text fires EN_CHANGE during CreateWindowExW,
+        // when g_rmInput isn't assigned yet).
         SetWindowTextW(g_rmInput, currentFriendly.c_str());
-        g_rmText = currentFriendly;   // ensure the buffer matches immediately
-        // Select-all so the first keystroke replaces the pre-populated
-        // friendly name.
-        SendMessage(g_rmInput, EM_SETSEL, 0, -1);
+        g_rmText = currentFriendly;
+        // Put the caret at the END so the user can edit/fix a typo rather
+        // than replacing everything. (No select-all — that wiped the field
+        // on the first keystroke.)
+        int len = (int)currentFriendly.size();
+        SendMessage(g_rmInput, EM_SETSEL, (WPARAM)len, (LPARAM)len);
     }
 
     // OK on the LEFT, Cancel on the RIGHT — matches the plugin manager

@@ -793,7 +793,7 @@ D2RLoader community server. Close or Esc dismisses it.
   HUB VIEW
   --------
 
-      Angiris  v1.6
+      Angiris  v1.6.1
       D2RLoader  v1.0.1 - beta        (or "Not detected")
 
       [   Latest D2RLoader   ]        <- download + install button
@@ -1101,6 +1101,9 @@ no manual copying into d2rloader\ folders.
     * Drop a .zip of .json files  -> the launcher extracts just the JSONs
                                      to the patches folder (ignores anything
                                      else in the zip)
+  A patch bundle CAN include a manifest if you want to ship a readme or
+  other files alongside it; name it plugin_info.json or patch_info.json
+  (either is accepted).
 
   OVERWRITES are always confirmed. If a file already exists you're asked
   before it's replaced, and the previous version is kept as <name>.old

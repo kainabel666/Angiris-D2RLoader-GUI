@@ -93,6 +93,11 @@ struct PluginInstallPlan {
     // triggers the "which mod?" picker (one picker serves all of them).
     bool     needsModPicker = false;
 
+    // Set during mod resolution if any {mpq} literal destPath resolved
+    // against a PACKED (encrypted) .mpq file — you can't write inside one,
+    // so the caller warns and those files are skipped.
+    bool     mpqLiteralPacked = false;
+
     // Resolved plugins folder for this scope — used by ExecuteNoManifest
     // (no-manifest dump target) and available for reference.
     wstring  pluginsDir;

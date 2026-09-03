@@ -21,7 +21,7 @@
 #include "assets.h"        // AssetImage, DrawButton9Slice
 #include "buttons.h"       // MkStdBtn, PaintOwnerDrawButton, ButtonKind
 #include "ui_state.h"      // g_loaderOpts
-#include "mod_scan.h"      // v1.6.2: g_mods / g_selMod (override-toml detection)
+#include "mod_scan.h"      // v1.7: g_mods / g_selMod (override-toml detection)
 
 #include <cstdlib>         // _wtoi
 
@@ -66,11 +66,11 @@ constexpr int BO_MENU_ITEM_H = 28;
 // String dropdowns carry full language names, so their menu is wider.
 constexpr int BO_MENU_STR_W  = 232;
 
-// Was 16, which silently truncated: ShowLoaderOptionsModal clamps
-// rowCount to this and rows past the cap simply never render. D2RLoader
-// 1.1.0 pushes Basic to 20 rows and Developer to 18, so this must stay
-// comfortably ahead of both row tables.
-constexpr int BO_MAX_ROWS = 24;
+// ShowLoaderOptionsModal clamps rowCount to this and rows past the cap
+// simply never render — silently. It has had to move every time
+// D2RLoader gained settings (16 → 24 → 32). 1.2.1 puts Basic at 29 and
+// Developer at 18, so keep real headroom ahead of both row tables.
+constexpr int BO_MAX_ROWS = 32;
 
 // ── Scrolling ────────────────────────────────────────────────────────
 // The 1.1.0 row tables overflow any sane window height (Basic alone is
@@ -203,12 +203,17 @@ static int StrRowIndex(const BoRow& r) {
 // [d2rloader] keys, [d2rloader.backups] and the two extension switches
 // from [d2rloader.advanced].
 //
-// Deliberately absent: default_mod (the Play handler writes it from the
-// mod picker, so a second control here would be a competing source of
-// truth), skip_title_screen (forced off by EnforceLoaderTomlOwnership
-// every run, so a control would be a lie) and launch_arguments (the
-// Play handler merges the flag grid into it — see
-// BuildTomlLaunchArguments).
+// Deliberately absent, because the Play handler writes all of these
+// from the launch-settings grid and would silently overwrite anything
+// set here:
+//   default_mod              — from the mod picker
+//   launch_arguments         — merged from the flag grid
+//   skip_title_screen        — Skip Intro checkbox
+//   enable_respec            — Respec checkbox
+//   always_generate_new_maps — Reset Maps checkbox
+// The last three moved out of this list in v1.7 when those checkboxes
+// switched from command-line flags to dedicated toml keys. A duplicate
+// control here would appear to work and then revert on next launch.
 //
 // Stash Tabs is a text box, not a dropdown: 1.1.0 ships 100 by default
 // and a 100-item TrackPopupMenu is unusable.
@@ -227,10 +232,38 @@ static BoRow g_boRowsBasic[] = {
       &g_loaderOpts.bindDemonCurseSelection,
       kRulesetValues, kRulesetShort, kCurseLong, 2 },
 
+    // ── [d2rcore.automap] (1.2.1) ──
+    { BoKind::Toggle,      L"Automap: Area Name",
+      &g_loaderOpts.automapAreaName,     nullptr, 0, 0,
+      L"d2rcore.automap", L"show_area_name",           -1, false, nullptr },
+    { BoKind::Toggle,      L"Automap: Game Version",
+      &g_loaderOpts.automapGameVersion,  nullptr, 0, 0,
+      L"d2rcore.automap", L"show_game_version",        -1, false, nullptr },
+    { BoKind::Toggle,      L"Automap: Difficulty",
+      &g_loaderOpts.automapDifficulty,   nullptr, 0, 0,
+      L"d2rcore.automap", L"show_game_difficulty",     -1, false, nullptr },
+    { BoKind::Toggle,      L"Automap: Game IP",
+      &g_loaderOpts.automapIpAddress,    nullptr, 0, 0,
+      L"d2rcore.automap", L"show_game_ip_address",     -1, false,
+      L"LAN and Direct Join only; listed games stay private" },
+    { BoKind::Toggle,      L"Automap: Game Type",
+      &g_loaderOpts.automapTypeExpansion, nullptr, 0, 0,
+      L"d2rcore.automap", L"show_game_type_expansion", -1, false, nullptr },
+    { BoKind::Toggle,      L"Automap: Game ID",
+      &g_loaderOpts.automapGameId,       nullptr, 0, 0,
+      L"d2rcore.automap", L"show_game_id",             -1, false, nullptr },
+    { BoKind::Toggle,      L"Automap: Current Mod",
+      &g_loaderOpts.automapCurrentMod,   nullptr, 0, 0,
+      L"d2rcore.automap", L"show_current_mod",         -1, false, nullptr },
+
     // ── [d2rcore.items] ──
     { BoKind::Toggle,      L"Show Sockets",
       &g_loaderOpts.showGroundSockets, nullptr, 0, 0,
       L"d2rcore.items",  L"show_ground_sockets",  -1, false, nullptr },
+    { BoKind::IntTextBox,  L"Floor Label Limit",
+      nullptr, &g_loaderOpts.floorItemDisplayLimit, 0, 128,
+      L"d2rcore.items",  L"floor_item_display_limit", -1, false,
+      L"Ground item labels shown at once. Default 32, max 128" },
     { BoKind::Toggle,      L"Show Item Level",
       &g_loaderOpts.displayItemLevels, nullptr, 0, 0,
       L"d2rcore.items",  L"display_item_levels",  -1, false, nullptr },
@@ -243,9 +276,6 @@ static BoRow g_boRowsBasic[] = {
       L"d2rcore.items",  L"maximum_sockets",      -1, false, nullptr },
 
     // ── [d2rcore.player] ──
-    { BoKind::Toggle,      L"Respec Skill/Stats",
-      &g_loaderOpts.enableRespec,      nullptr, 0, 0,
-      L"d2rcore.player", L"enable_respec",        -1, false, nullptr },
     { BoKind::Toggle,      L"RotW Renderer Key",
       &g_loaderOpts.alwaysEnableRotwLegacyKeybind, nullptr, 0, 0,
       L"d2rcore.player", L"always_enable_rotw_legacy_graphics_keybind",
@@ -253,26 +283,23 @@ static BoRow g_boRowsBasic[] = {
 
     // ── [d2rcore.stash] ──
     { BoKind::IntTextBox,  L"Stash Tabs",
-      nullptr, &g_loaderOpts.addSharedTabs,     0, 100,
+      nullptr, &g_loaderOpts.addSharedTabs,     0, 995,
       L"d2rcore.stash",  L"add_shared_tabs",      -1, false,
-      L"Extra shared tabs. Default = 100" },
+      L"Extra shared tabs. Max 995 (1,000 total in RotW)" },
     { BoKind::IntTextBox,  L"Material Limit",
       nullptr, &g_loaderOpts.setMaterialsLimit, 0, 255,
       L"d2rcore.stash",  L"set_materials_limit",  -1, false,
       L"Default = 99, Max = 255" },
 
     // ── [d2rloader] ──
-    { BoKind::Toggle,      L"Show TCP/IP Button",
+    { BoKind::Toggle,      L"Show Multiplayer Button",
       &g_loaderOpts.showTcpipButton,   nullptr, 0, 0,
-      L"d2rloader",      L"show_tcpip_button",    -1, false, nullptr },
+      L"d2rloader",      L"show_tcpip_button",    -1, false,
+      L"1.2.1 renamed this button from TCP/IP to Multiplayer" },
     { BoKind::Toggle,      L"Check For Updates",
       &g_loaderOpts.checkForUpdates,   nullptr, 0, 0,
       L"d2rloader",      L"check_for_updates",    -1, false,
       L"D2RLoader's own update check" },
-    { BoKind::Toggle,      L"New Maps Each Load",
-      &g_loaderOpts.alwaysGenerateNewMaps, nullptr, 0, 0,
-      L"d2rloader",      L"always_generate_new_maps", -1, false,
-      L"Off keeps each character's map layout" },
     { BoKind::StrDropdown, L"Text Language",
       nullptr, nullptr, 0, 0,
       L"d2rloader",      L"text_locale",          -1, false, nullptr,
@@ -291,11 +318,25 @@ static BoRow g_boRowsBasic[] = {
       L"Backs up before the first save each session" },
     { BoKind::IntTextBox,  L"Backups Kept",
       nullptr, &g_loaderOpts.retainedSessions,  1, 100,
-      L"d2rloader.backups", L"retained_sessions", 15, true,
+      L"d2rloader.backups", L"retained_sessions", 21, true,
       L"Per character. Range 1-100" },
     { BoKind::Toggle,      L"Back Up Shared Stash",
       &g_loaderOpts.backupSharedStashes, nullptr, 0, 0,
-      L"d2rloader.backups", L"shared_stashes",    15, true, nullptr },
+      L"d2rloader.backups", L"shared_stashes",    21, true, nullptr },
+
+    // ── [d2rloader.advanced] — networking (1.2.1) ──
+    { BoKind::IntTextBox,  L"Game Port",
+      nullptr, &g_loaderOpts.gamePort, 1, 65535,
+      L"d2rloader.advanced", L"game_port", -1, false,
+      L"TCP port for hosting and joining. Default 4000" },
+    { BoKind::Toggle,      L"Auto Port Mapping",
+      &g_loaderOpts.automaticPortMapping, nullptr, 0, 0,
+      L"d2rloader.advanced", L"automatic_port_mapping", -1, false,
+      L"Ask the router for a temporary port mapping" },
+    { BoKind::Toggle,      L"Hosting Check",
+      &g_loaderOpts.hostingCheck, nullptr, 0, 0,
+      L"d2rloader.advanced", L"hosting_check", -1, false,
+      L"Test from outside your network that the port is reachable" },
 
     // ── [d2rloader.advanced] — the two extension gates ──
     { BoKind::Toggle,      L"Allow Global Plugins",
@@ -411,7 +452,7 @@ constexpr int BO_EDIT_ID_BASE = 100;
 static const BoRow*  g_activeRows     = nullptr;
 static int           g_activeRowCount = 0;
 static const wchar_t* g_activeTitle   = L"";
-// v1.6.2: set when the active mod ships its own D2RLoader.toml. Only
+// v1.7: set when the active mod ships its own D2RLoader.toml. Only
 // Basic Options cares — see BoDetectModOverride.
 static bool    g_boModOverride     = false;
 static wstring g_boModOverrideName;
@@ -1188,7 +1229,7 @@ static LRESULT CALLBACK BasicOptionsProc(HWND hw, UINT msg,
                     &sfT, &titleBr);
             }
 
-            // v1.6.2: pinned notice when the active mod ships its own
+            // v1.7: pinned notice when the active mod ships its own
             // D2RLoader.toml. The [d2rcore.*] rows below show GLOBAL
             // values the mod may be overriding, so say so rather than
             // letting the modal imply it's showing what's in effect.

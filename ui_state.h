@@ -44,11 +44,21 @@ struct LoaderOpts {
     wstring auraEnchantedSelection  = L"3.2";
     wstring bindDemonCurseSelection = L"3.2";
 
+    // ── [d2rcore.automap] (new in D2RLoader 1.2.1) ───────────────────
+    bool automapAreaName     = true;
+    bool automapGameVersion  = false;
+    bool automapDifficulty   = true;
+    bool automapIpAddress    = true;
+    bool automapTypeExpansion = false;
+    bool automapGameId       = true;
+    bool automapCurrentMod   = true;
+
     // [d2rcore.items]
     bool showGroundSockets   = false;
     bool displayItemLevels   = false;
     bool itemStatRanges      = false;   // 1.1.0
     bool maximumSockets      = false;   // 1.1.0
+    int  floorItemDisplayLimit = 32;    // 1.2.1 — vanilla 32, max 128
 
     // [d2rcore.player]
     bool enableRespec        = false;
@@ -56,15 +66,16 @@ struct LoaderOpts {
     bool alwaysEnableRotwLegacyKeybind = false;
 
     // [d2rcore.stash]
-    // NOTE: 1.1.0 ships add_shared_tabs = 100 by default. The old 0-16
-    // dropdown can't represent that; see the clamp in LoadLoaderOpts.
-    int  addSharedTabs       = 0;     // vanilla=0
+    // 1.2.1 documents a maximum of 995 additional tabs (1,000 total in
+    // RotW). Earlier versions stated no ceiling, and the launcher
+    // clamped to 100 — which would silently truncate anyone above it.
+    int  addSharedTabs       = 0;     // vanilla=0, max 995
     int  setMaterialsLimit   = 99;    // vanilla=99, max=255
 
     // ── [d2rloader] ──────────────────────────────────────────────────
     // default_mod, skip_title_screen and launch_arguments are NOT
     // mirrored here on purpose. The launcher owns all three: as of
-    // v1.6.2 the Play handler WRITES default_mod and launch_arguments
+    // v1.7 the Play handler WRITES default_mod and launch_arguments
     // from the mod picker and flag grid (D2RLoader.toml is the launch
     // config now, not argv), and EnforceLoaderTomlOwnership() forces
     // skip_title_screen off every run. Exposing any of them here would
@@ -84,6 +95,11 @@ struct LoaderOpts {
     // The two extension switches gate whether ANY plugin or patch loads.
     // With either off, installs made through the Plugin Manager or the
     // Repository Browser silently do nothing in-game.
+    // Networking, new in 1.2.1.
+    int  gamePort            = 4000;
+    bool automaticPortMapping = true;
+    bool hostingCheck        = true;
+
     bool allowGlobalExtensions = true;
     bool allowModExtensions    = true;
     bool writeCrashDumps       = false;

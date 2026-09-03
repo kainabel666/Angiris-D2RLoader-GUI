@@ -9,7 +9,7 @@
 // launch_flags.h so paint code and dialogs read the same fields.
 ModSettings g_modSettings;
 
-// v1.6.2: "Use Txts" is NO LONGER locked. It used to be forced on
+// v1.7: "Use Txts" is NO LONGER locked. It used to be forced on
 // because D2RLoader.exe required -txt to launch a mod at all; that
 // requirement is gone, so the flag is a normal toggle now (still
 // defaulting to on — see ModSettings::useTxt). No flag is currently
@@ -131,12 +131,15 @@ wstring BuildTomlLaunchArguments(const wstring& existing) {
         if (!out.empty()) out += L' ';
         out += t;
     };
+    // NOTE: respec / resetMaps / skipIntro are deliberately absent.
+    // D2RLoader 1.1.0 has dedicated toml keys for all three
+    // (enable_respec, always_generate_new_maps, skip_title_screen) and
+    // the launcher writes those directly — see the Play handler. Adding
+    // the command-line equivalents here as well would set the same
+    // behaviour twice through two different mechanisms.
     if (g_modSettings.useTxt)    add(L"-txt");
     if (g_modSettings.windowed)  add(L"-w");
     if (g_modSettings.noSound)   add(L"-ns");
-    if (g_modSettings.respec)    add(L"-enablerespec");
-    if (g_modSettings.resetMaps) add(L"-resetofflinemaps");
-    if (g_modSettings.skipIntro) add(L"-skiplogovideo");
     // -seed stays last, per the per-mod seed feature spec.
     if (g_modSettings.useSeed && !g_modSettings.seedArg.empty()) {
         add(L"-seed");

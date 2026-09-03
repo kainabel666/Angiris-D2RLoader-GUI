@@ -672,7 +672,7 @@ static wstring TomlGetStr(const wstring& path, const wstring& section,
 // Save helpers. Toml bools are bare tokens (no quotes); ints likewise
 // bare. Strings MUST be quoted, and the quotes are part of the value we
 // hand IniSetStr — that's the same convention
-// EnforceLoaderTomlOwnership() uses when it writes skip_title_screen.
+// EnforceLoaderTomlOwnership() uses when it writes a bare toml string.
 // Non-static so the Loader Options modals can call them directly.
 void SaveTomlBool(const wchar_t* section, const wchar_t* key, bool v) {
     IniSetStr(LoaderTomlPath(), section, key, v ? L"true" : L"false");
@@ -703,6 +703,22 @@ static void LoadLoaderOpts() {
     g_loaderOpts.bindDemonCurseSelection =
         TomlGetStr(p,  L"d2rcore.game_rules", L"bind_demon_curse_selection", L"3.2");
 
+    // [d2rcore.automap] (1.2.1)
+    g_loaderOpts.automapAreaName =
+        TomlGetBool(p, L"d2rcore.automap", L"show_area_name",           true);
+    g_loaderOpts.automapGameVersion =
+        TomlGetBool(p, L"d2rcore.automap", L"show_game_version",        false);
+    g_loaderOpts.automapDifficulty =
+        TomlGetBool(p, L"d2rcore.automap", L"show_game_difficulty",     true);
+    g_loaderOpts.automapIpAddress =
+        TomlGetBool(p, L"d2rcore.automap", L"show_game_ip_address",     true);
+    g_loaderOpts.automapTypeExpansion =
+        TomlGetBool(p, L"d2rcore.automap", L"show_game_type_expansion", false);
+    g_loaderOpts.automapGameId =
+        TomlGetBool(p, L"d2rcore.automap", L"show_game_id",             true);
+    g_loaderOpts.automapCurrentMod =
+        TomlGetBool(p, L"d2rcore.automap", L"show_current_mod",         true);
+
     // [d2rcore.items]
     g_loaderOpts.showGroundSockets =
         TomlGetBool(p, L"d2rcore.items",   L"show_ground_sockets",  false);
@@ -712,6 +728,8 @@ static void LoadLoaderOpts() {
         TomlGetBool(p, L"d2rcore.items",   L"item_stat_ranges",     false);
     g_loaderOpts.maximumSockets =
         TomlGetBool(p, L"d2rcore.items",   L"maximum_sockets",      false);
+    g_loaderOpts.floorItemDisplayLimit =
+        IniGetInt(p,   L"d2rcore.items",   L"floor_item_display_limit", 32);
 
     // [d2rcore.player]
     g_loaderOpts.enableRespec =
@@ -746,7 +764,13 @@ static void LoadLoaderOpts() {
     g_loaderOpts.backupSharedStashes =
         TomlGetBool(p, L"d2rloader.backups", L"shared_stashes",     true);
 
-    // [d2rloader.advanced] (1.1.0)
+    // [d2rloader.advanced] — networking new in 1.2.1
+    g_loaderOpts.gamePort =
+        IniGetInt(p,   L"d2rloader.advanced", L"game_port",             4000);
+    g_loaderOpts.automaticPortMapping =
+        TomlGetBool(p, L"d2rloader.advanced", L"automatic_port_mapping", true);
+    g_loaderOpts.hostingCheck =
+        TomlGetBool(p, L"d2rloader.advanced", L"hosting_check",          true);
     g_loaderOpts.allowGlobalExtensions =
         TomlGetBool(p, L"d2rloader.advanced", L"allow_global_extensions", true);
     g_loaderOpts.allowModExtensions =
@@ -795,14 +819,20 @@ static void LoadLoaderOpts() {
     // Clamp integer ranges to sane values in case the file was
     // hand-edited to something the launcher UI can't produce.
     //
-    // add_shared_tabs: the old ceiling here was 16, matching the Basic
-    // modal's dropdown. D2RLoader 1.1.0 ships 100 as its stock default,
-    // so a 16 clamp would silently rewrite every default install's value
-    // down by 84 the first time a user touched any Basic setting.
-    // Ceiling raised to 100; the UI control has to change from a
-    // dropdown to a text box to match (see the row table).
+    // add_shared_tabs: this ceiling has moved twice. It was 16 (matching
+    // an old dropdown), then 100 when 1.1.0 shipped that as its default.
+    // 1.2.1 documents the real maximum as 995 additional tabs (1,000
+    // total in RotW). Each time the clamp lagged the loader, it silently
+    // rewrote the user's value DOWN on the first Basic Options edit.
     if (g_loaderOpts.addSharedTabs     < 0)   g_loaderOpts.addSharedTabs     = 0;
-    if (g_loaderOpts.addSharedTabs     > 100) g_loaderOpts.addSharedTabs     = 100;
+    if (g_loaderOpts.addSharedTabs     > 995) g_loaderOpts.addSharedTabs     = 995;
+    // floor_item_display_limit: vanilla 32, documented max 128.
+    if (g_loaderOpts.floorItemDisplayLimit < 0)   g_loaderOpts.floorItemDisplayLimit = 0;
+    if (g_loaderOpts.floorItemDisplayLimit > 128) g_loaderOpts.floorItemDisplayLimit = 128;
+    // game_port: a TCP port. 0 would mean "any", which isn't useful for
+    // a value players must match when joining.
+    if (g_loaderOpts.gamePort < 1)     g_loaderOpts.gamePort = 1;
+    if (g_loaderOpts.gamePort > 65535) g_loaderOpts.gamePort = 65535;
     if (g_loaderOpts.setMaterialsLimit < 0)   g_loaderOpts.setMaterialsLimit = 0;
     if (g_loaderOpts.setMaterialsLimit > 255) g_loaderOpts.setMaterialsLimit = 255;
     // retained_sessions: toml documents 1-100 explicitly.
@@ -810,12 +840,15 @@ static void LoadLoaderOpts() {
     if (g_loaderOpts.retainedSessions  > 100) g_loaderOpts.retainedSessions  = 100;
 }
 
-// skip_title_screen bypasses the title screen entry point, which the
-// launcher owns outright, so it's forced off every time Angiris runs.
+// This used to force skip_title_screen off on every run. As of v1.7 the
+// Skip Intro checkbox in launch settings WRITES that key at launch, so
+// clearing it here would fight the user's own choice — the same mistake
+// default_mod had. Both are now written at Play instead of enforced at
+// startup.
 //
 // default_mod used to be cleared here too. That was correct while the
 // launcher passed -mod on the command line: a stale default_mod would
-// have been a second, competing source of mod selection. As of v1.6.2
+// have been a second, competing source of mod selection. As of v1.7
 // it IS the mod selection — the Play handler writes it immediately
 // before launching — so blanking it on startup would erase the very
 // value the launcher just relied on, and leave the toml disagreeing
@@ -826,7 +859,9 @@ static void LoadLoaderOpts() {
 // launched. That's this setting's documented purpose, so it's left
 // alone rather than fought.
 static void EnforceLoaderTomlOwnership() {
-    IniSetStr(LoaderTomlPath(), L"d2rloader", L"skip_title_screen", L"false");
+    // Nothing to enforce at startup any more. Kept as the single place
+    // to put any future "launcher owns this key" rule, and because the
+    // call site documents the intent.
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2653,7 +2688,7 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             // through the loader, not the bare game executable.
             wstring exe  = g_cfg.d2rPath + L"\\D2RLoader.exe";
 
-            // v1.6.2: launch config goes into D2RLoader.toml rather than
+            // v1.7: launch config goes into D2RLoader.toml rather than
             // argv — default_mod picks the mod, launch_arguments carries
             // the rest. One source of truth, so the toml, the preview
             // string and what the game receives can't drift apart.
@@ -2693,6 +2728,24 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             if (tomlOk) {
                 SaveTomlStr(L"d2rloader", L"default_mod",      modFolder.c_str());
                 SaveTomlStr(L"d2rloader", L"launch_arguments", mergedArgs.c_str());
+
+                // Three launch-settings checkboxes map onto dedicated
+                // 1.1.0 toml keys rather than command-line flags, so
+                // they're written here instead of appearing in
+                // launch_arguments. Per-mod by nature: each launch
+                // stamps the toml with the settings of the mod being
+                // launched.
+                SaveTomlBool(L"d2rcore.player", L"enable_respec",
+                             g_modSettings.respec);
+                SaveTomlBool(L"d2rloader", L"always_generate_new_maps",
+                             g_modSettings.resetMaps);
+                SaveTomlBool(L"d2rloader", L"skip_title_screen",
+                             g_modSettings.skipIntro);
+
+                // Keep the in-memory mirror in step so anything reading
+                // g_loaderOpts later in the session sees what's on disk.
+                g_loaderOpts.enableRespec         = g_modSettings.respec;
+                g_loaderOpts.alwaysGenerateNewMaps = g_modSettings.resetMaps;
 
                 tomlOk =
                     (TomlGetStr(tomlPath, L"d2rloader", L"default_mod", L"")

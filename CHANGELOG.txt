@@ -1,9 +1,40 @@
 ANGIRIS LAUNCHER — CHANGELOG
 ══════════════════════════════════════════════════════════════════════
+v1.7.0.1 
+
+Launch options now use D2RLoader's own settings
+
+The Respec, Reset Maps and Skip Intro checkboxes used to be passed to the game as command-line flags (-enablerespec, -resetofflinemaps, -skiplogovideo). 
+
+D2RLoader 1.2.1 has proper settings for all three, and the old flags were no longer being applied — which is why ticking Respec did nothing in game.
+
+The launcher now writes these directly into D2RLoader.toml when you hit Play, so the checkbox state is what actually reaches the game:
+
+Respec → enable_respec
+Reset Maps → always_generate_new_maps
+Skip Intro → skip_title_screen
+
+They're still per-mod, so each mod keeps its own settings and the toml is stamped with them at launch.
+
+Support for D2RLoader 1.2.1's new settings
+
+Loader Options now covers everything 1.2.1 added — eleven new settings in total:
+
+Automap display (seven toggles) — show the area name, game version, difficulty, IP address, game type, Game ID, and the active mod name on the automap.
+
+Floor Label Limit — how many ground item labels show at once (default 32, max 128).
+
+Networking — Game Port, Auto Port Mapping and Hosting Check, for TCP/IP and Direct Join games.
+
+Fixed: Stash Tabs was capped at 100
+
+D2RLoader 1.2.1 documents the real maximum as 995 additional tabs (1,000 total in RotW). The launcher was clamping the value to 100, so if you had more than that, opening Basic Options and changing anything would quietly reduce your tab count. The limit now matches the loader.
+
+Also: the TCP/IP button setting is relabelled "Show Multiplayer Button" to match what 1.2.1 calls it in game. It's the same setting, just renamed.
 
 ## v1.7
 
-Support for **D2RLoader 1.1.0**, a downloadable **plugin repository**, and a
+Support for **D2RLoader 1.2.1**, a downloadable **plugin repository**, and a
 rebuilt Plugin Manager.
 
 ### Plugin Repository (new)
@@ -21,9 +52,10 @@ rebuilt Plugin Manager.
   the catalog entry. A mismatch now shows both names so it's obvious which
   side is wrong.
 
-### D2RLoader 1.1.0 settings
+### D2RLoader settings
 
-- **Loader Options now covers all of 1.1.0's settings**, up from 16 to 37 —
+- **Loader Options now covers D2RLoader's full settings list**, up from 16
+  to 37 —
   Aura Enchanted and Bind Demon rules, item stat ranges, maximum sockets,
   character backups, text and audio language, the extension gates, and nine
   new logging categories.

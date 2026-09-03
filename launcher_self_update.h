@@ -55,7 +55,7 @@ constexpr const wchar_t* LAUNCHER_GITHUB_REPO  = L"Angiris-D2RLoader-GUI";
 // `inline constexpr` (C++17 inline variable) so every TU that
 // includes this header sees the same definition without an ODR
 // violation — no separate .cpp definition needed.
-inline constexpr const wchar_t* LAUNCHER_VERSION = L"1.6.1";
+inline constexpr const wchar_t* LAUNCHER_VERSION = L"1.7.0.1";
 
 // ── Worker → UI protocol ─────────────────────────────────────────────
 

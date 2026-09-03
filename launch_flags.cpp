@@ -9,7 +9,11 @@
 // launch_flags.h so paint code and dialogs read the same fields.
 ModSettings g_modSettings;
 
-// "Use Txts" is locked on: D2RLoader.exe requires -txt to launch mods.
+// v1.6.2: "Use Txts" is NO LONGER locked. It used to be forced on
+// because D2RLoader.exe required -txt to launch a mod at all; that
+// requirement is gone, so the flag is a normal toggle now (still
+// defaulting to on — see ModSettings::useTxt). No flag is currently
+// locked, but the isLocked mechanism is kept for future use.
 //
 // Order matters: this controls BOTH the visual layout of the 2x3
 // grid AND the order in which flags appear in the launch-args
@@ -26,7 +30,7 @@ ModSettings g_modSettings;
 //  when non-empty; the seed UI lives in its own row below the flag
 //  grid.)
 const FlagDef FLAGS[kNumFlags] = {
-    { &ModSettings::useTxt,    L"Use Txts",   L"-txt",             L"Use raw .txt data",         true  },
+    { &ModSettings::useTxt,    L"Use Txts",   L"-txt",             L"Use raw .txt data",         false },
     { &ModSettings::respec,    L"Respec",     L"-enablerespec",    L"Allow free skill respec",   false },
     { &ModSettings::windowed,  L"Window",     L"-w",               L"Run in a window",           false },
     { &ModSettings::resetMaps, L"Reset Maps", L"-resetofflinemaps",L"Re-roll all map seeds",     false },
@@ -56,4 +60,87 @@ wstring BuildLaunchArgs() {
     if (g_modSettings.useSeed && !g_modSettings.seedArg.empty())
         args += L" -seed " + g_modSettings.seedArg;
     return args;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  TOML LAUNCH CONFIG (D2RLoader 1.1.0)
+// ═══════════════════════════════════════════════════════════════════════
+//
+// 1.1.0 wants launch config in D2RLoader.toml rather than on the command
+// line: `default_mod` selects the mod, `launch_arguments` supplies extra
+// game args (and explicitly forbids -mod). Writing there instead of
+// passing argv gives one source of truth, so the toml, our preview
+// string and what the game actually receives can't disagree.
+//
+// The catch is that launch_arguments is user-editable and may hold flags
+// we know nothing about. Replacing it wholesale would silently destroy
+// those, so we MERGE: strip only the tokens this launcher owns, keep
+// everything else, then append our current flag set.
+
+// Flags we own — anything here is ours to rewrite on every launch.
+// Kept separate from FLAGS[] because it also covers the value-taking
+// args (-seed) and -mod, which isn't a grid flag at all.
+static bool IsOwnedFlag(const wstring& tok) {
+    for (const auto& f : FLAGS) {
+        if (tok == f.arg) return true;
+    }
+    return tok == L"-seed" || tok == L"-mod";
+}
+
+// Args that consume the following token as their value.
+static bool FlagTakesValue(const wstring& tok) {
+    return tok == L"-seed" || tok == L"-mod";
+}
+
+// Explicit rather than iswspace() so this does not depend on <cwctype>
+// being pulled in transitively. Command lines only ever separate on
+// spaces and tabs anyway.
+static bool IsArgSpace(wchar_t c) {
+    return c == L' ' || c == L'\t';
+}
+
+wstring StripOwnedLaunchArgs(const wstring& existing) {
+    wstring out;
+    size_t i = 0;
+    while (i < existing.size()) {
+        while (i < existing.size() && IsArgSpace(existing[i])) ++i;
+        if (i >= existing.size()) break;
+        size_t start = i;
+        while (i < existing.size() && !IsArgSpace(existing[i])) ++i;
+        wstring tok = existing.substr(start, i - start);
+        if (IsOwnedFlag(tok)) {
+            // Drop it, plus its value if it takes one.
+            if (FlagTakesValue(tok)) {
+                while (i < existing.size() && IsArgSpace(existing[i])) ++i;
+                while (i < existing.size() && !IsArgSpace(existing[i])) ++i;
+            }
+            continue;
+        }
+        if (!out.empty()) out += L' ';
+        out += tok;
+    }
+    return out;
+}
+
+// The value to write to launch_arguments: the user's unknown flags
+// first, then ours in the fixed order. -mod is deliberately absent —
+// it goes to default_mod, and the toml forbids it here.
+wstring BuildTomlLaunchArguments(const wstring& existing) {
+    wstring out = StripOwnedLaunchArgs(existing);
+    auto add = [&](const wstring& t) {
+        if (!out.empty()) out += L' ';
+        out += t;
+    };
+    if (g_modSettings.useTxt)    add(L"-txt");
+    if (g_modSettings.windowed)  add(L"-w");
+    if (g_modSettings.noSound)   add(L"-ns");
+    if (g_modSettings.respec)    add(L"-enablerespec");
+    if (g_modSettings.resetMaps) add(L"-resetofflinemaps");
+    if (g_modSettings.skipIntro) add(L"-skiplogovideo");
+    // -seed stays last, per the per-mod seed feature spec.
+    if (g_modSettings.useSeed && !g_modSettings.seedArg.empty()) {
+        add(L"-seed");
+        add(g_modSettings.seedArg);
+    }
+    return out;
 }

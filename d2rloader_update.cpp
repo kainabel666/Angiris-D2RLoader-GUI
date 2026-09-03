@@ -5,7 +5,8 @@
 //  Flow (all on a background thread):
 //    1. Download d2rloader.net/downloads/latest → temp\d2rloader.zip
 //    2. Verify the download against the SHA-256 published on
-//       d2rloader.net. Mismatch aborts; an unavailable hash only warns.
+//       d2rloader.net/download.html. Mismatch aborts; an unavailable
+//       hash only warns.
 //    3. Extract with bsdtar → temp\extracted
 //    4. Copy the extracted tree into the D2R directory, but PRESERVE the
 //       user's D2RLoader.toml (never overwrite it).
@@ -37,8 +38,15 @@
 
 static const wchar_t* kD2RLoaderZipUrl =
     L"https://d2rloader.net/downloads/latest";
-static const wchar_t* kD2RLoaderSiteUrl =
-    L"https://d2rloader.net";
+// The page carrying the release version + SHA-256, which is what the
+// scrapers below need — NOT the site root. d2rloader.net was split into
+// Overview / Download / Changelog / Docs, moving both the release
+// filename and the checksum off the landing page. Pointing this at
+// https://d2rloader.net finds neither, so the update check silently
+// reports "up to date" forever. Keep it on the page that actually
+// prints "D2RLoader-<version>.zip" and the hash.
+static const wchar_t* kD2RLoaderDownloadPageUrl =
+    L"https://d2rloader.net/download.html";
 
 static std::atomic<bool> g_d2rlInstallRunning{ false };
 static std::atomic<bool> g_d2rlCheckRunning{ false };
@@ -72,7 +80,7 @@ wstring GetInstalledD2RLoaderVersion() {
     return out;
 }
 
-// Scrape the latest version from the d2rloader.net home page. The page
+// Scrape the latest version from the d2rloader.net download page. It
 // exposes the version in several spots; the most stable is the release
 // filename "D2RLoader-<version>.zip" (e.g. D2RLoader-1.0.1-beta.zip).
 // Returns the version string (e.g. "1.0.1-beta") or empty if not found.
@@ -112,7 +120,7 @@ static bool IsHexDigit(wchar_t c) {
         || (c >= L'A' && c <= L'F');
 }
 
-// Pull the published SHA-256 out of the d2rloader.net home page. The page
+// Pull the published SHA-256 out of the d2rloader.net download page. It
 // prints the hash in a code block under a "SHA-256" heading, and ALSO
 // prints a certificate thumbprint elsewhere — the thumbprint is 40 hex
 // chars and a SHA-256 is exactly 64, so requiring a bounded 64-char hex
@@ -486,7 +494,7 @@ static DWORD WINAPI D2RLoaderInstallWorker(LPVOID param) {
     }
 
     // 2. Verify the download against the published SHA-256 ------------
-    // d2rloader.net publishes the release hash on its home page. We fetch
+    // d2rloader.net publishes the release hash on its download page. We fetch
     // that page, scrape the hash, and compare it against the bytes we
     // actually received.
     //
@@ -502,7 +510,7 @@ static DWORD WINAPI D2RLoaderInstallWorker(LPVOID param) {
     Notify(notify, MSG_D2RLOADER_INSTALL_PROGRESS, D2RL_STAGE_VERIFYING);
     {
         wstring expected;
-        HttpResult page = HttpGet(kD2RLoaderSiteUrl, 8000);
+        HttpResult page = HttpGet(kD2RLoaderDownloadPageUrl, 8000);
         if (page.status == 200 && !page.body.empty()) {
             expected = ScrapeSha256(page.body);
         }
@@ -675,7 +683,7 @@ static DWORD WINAPI D2RLoaderUpdateCheckWorker(LPVOID param) {
     wstring installed = GetInstalledD2RLoaderVersion();
 
     wstring latest;
-    HttpResult r = HttpGet(kD2RLoaderSiteUrl, 8000);
+    HttpResult r = HttpGet(kD2RLoaderDownloadPageUrl, 8000);
     if (r.status == 200 && !r.body.empty()) {
         latest = ScrapeLatestVersion(r.body);
     }

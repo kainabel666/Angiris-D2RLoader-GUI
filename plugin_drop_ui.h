@@ -31,3 +31,11 @@ void HandlePluginManagerPatchDrop(HWND parent, const wstring& jsonPath,
 void HandleMainWindowPatchBundle(HWND parent, const wstring& zipPath);
 void HandlePluginManagerPatchBundle(HWND parent, const wstring& zipPath,
                                     const wstring& selectedModFolder);
+
+// Install an already-downloaded repository file (temp path) through the same
+// pipeline a drag-drop uses. `modLocal` chooses mod scope vs global; `mod` is
+// the target/bypass mod (from the browser's dropdown), fed into the pipeline
+// to bypass the mod picker for excel/{mod} files. Returns true on success,
+// false on failure or user cancel.
+bool HandleRepoInstall(HWND parent, const wstring& filePath, bool isPatch,
+                       bool modLocal, const wstring& mod);

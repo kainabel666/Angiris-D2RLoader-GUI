@@ -515,3 +515,87 @@ void HandlePluginManagerPatchBundle(HWND parent, const wstring& zipPath,
     HandlePatchBundleZip(zipPath, g_cfg.d2rPath,
                          InstallScope::Mod, selectedModFolder, cb, allow);
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Repository install — install an already-downloaded file through the same
+//  pipeline a drag-drop uses, with the browser's scope + mod choice.
+// ═══════════════════════════════════════════════════════════════════════
+
+namespace {
+
+// Context for the mod-bypass picker: carries the parent window AND the mod
+// the browser's dropdown pre-selected, so excel/{mod} files resolve to that
+// mod WITHOUT showing the picker UI.
+struct RepoPickCtx {
+    HWND    parent;
+    wstring mod;
+};
+
+// Bypass picker: returns the pre-chosen mod without any UI. Substituted for
+// CbPickExcelMod on the repo install path so the dropdown's mod flows
+// straight into the pipeline.
+wstring CbRepoBypassPick(void* ctx, const vector<wstring>& /*mods*/) {
+    auto* c = (RepoPickCtx*)ctx;
+    return c ? c->mod : wstring();
+}
+
+// Wrappers that pull the parent HWND out of the RepoPickCtx for the other
+// callbacks (which expect ctx == HWND).
+void CbRepoNoManifest(void* ctx)                                { CbNoManifest((void*)((RepoPickCtx*)ctx)->parent); }
+void CbRepoEncryptedMpq(void* ctx, const wstring& m)            { CbEncryptedMpq((void*)((RepoPickCtx*)ctx)->parent, m); }
+OverwriteChoice CbRepoAskOverwrite(void* ctx, bool hc, const wstring& n) { return CbAskOverwrite((void*)((RepoPickCtx*)ctx)->parent, hc, n); }
+void CbRepoError(void* ctx, const wstring& m)                  { CbError((void*)((RepoPickCtx*)ctx)->parent, m); }
+void CbRepoNotAuthorized(void* ctx, const wstring& pluginName,
+                         const wstring& modName, const wstring& modAuthor) {
+    CbNotAuthorized((void*)((RepoPickCtx*)ctx)->parent, pluginName, modName, modAuthor);
+}
+
+// Build callbacks for the repo path: same prompts as a drop, but the mod
+// picker is replaced by the dropdown-bypass.
+PluginDropCallbacks MakeRepoCallbacks(RepoPickCtx* ctx) {
+    PluginDropCallbacks cb;
+    cb.noManifestNotice   = CbRepoNoManifest;
+    cb.pickExcelMod       = CbRepoBypassPick;    // ← the bypass
+    cb.encryptedMpqNotice = CbRepoEncryptedMpq;
+    cb.askOverwrite       = CbRepoAskOverwrite;
+    cb.errorNotice        = CbRepoError;
+    cb.notAuthorized      = CbRepoNotAuthorized;
+    cb.ctx                = (void*)ctx;
+    return cb;
+}
+
+} // namespace
+
+bool HandleRepoInstall(HWND parent, const wstring& filePath, bool isPatch,
+                       bool modLocal, const wstring& mod) {
+    if (g_cfg.d2rPath.empty()) {
+        MessageBoxW(parent, L"Set your Diablo II: Resurrected path first.",
+                    L"Install", MB_OK | MB_ICONWARNING);
+        return false;
+    }
+
+    RepoPickCtx ctx{ parent, mod };
+    PluginDropCallbacks cb = MakeRepoCallbacks(&ctx);
+
+    InstallScope scope = modLocal ? InstallScope::Mod : InstallScope::Global;
+    wstring selMod = modLocal ? mod : wstring();
+
+    // Build the allowlist when installing into a manifest-mode mod.
+    PluginAllowlist allow;
+    if (modLocal && !mod.empty()) {
+        wstring modDir = g_cfg.d2rPath + L"\\mods\\" + mod;
+        PluginConfig mf = LoadPluginConfig(modDir);
+        if (mf.present) {
+            allow.active    = true;
+            allow.entries   = mf.plugins;
+            allow.modName   = mod;
+            allow.modAuthor = mf.author;
+        }
+    }
+
+    if (isPatch) {
+        return HandleBarePatchDrop(filePath, g_cfg.d2rPath, scope, selMod, cb, allow);
+    }
+    return HandlePluginDropZip(filePath, g_cfg.d2rPath, scope, selMod,
+                               ModListForPicker(), cb, allow);
+}

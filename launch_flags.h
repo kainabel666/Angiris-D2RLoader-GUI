@@ -28,7 +28,7 @@
 struct ModSettings {
     bool    noSound   = false;
     bool    windowed  = false;
-    bool    useTxt    = true;     // locked on, see FLAGS table
+    bool    useTxt    = true;     // defaults on; freely toggleable
     bool    skipIntro = false;
     bool    respec    = false;
     bool    resetMaps = false;
@@ -60,7 +60,10 @@ constexpr int kNumFlags = 6;
 // CLI string. Defined in launch_flags.cpp.
 extern const FlagDef FLAGS[kNumFlags];
 
-// Force any flag marked isLocked back to its required state. Called
+// Force any flag marked isLocked back to its required state. As of
+// v1.6.2 no flag is locked (-txt was unlocked once D2RLoader stopped
+// requiring it), so this is currently a no-op — kept because the
+// mechanism is still wired through paint and click handling. Called
 // by LoadModSettings so an older saved config (which might have
 // -txt off) gets corrected on load.
 void EnforceLockedFlags();
@@ -70,3 +73,16 @@ void EnforceLockedFlags();
 // in fixed arg order (which is independent of grid layout — see
 // the .cpp for the exact sequence).
 wstring BuildLaunchArgs();
+
+// ── TOML launch config (D2RLoader 1.1.0) ─────────────────────────────
+// Remove every token this launcher owns from an existing
+// launch_arguments value, preserving any flag the user added that we
+// know nothing about. Handles value-taking args (-seed VALUE, -mod
+// NAME) by dropping the value along with the flag.
+wstring StripOwnedLaunchArgs(const wstring& existing);
+
+// Merge our current flag set into an existing launch_arguments value:
+// unknown user flags first, then ours in fixed order with -seed last.
+// -mod is never emitted here — it belongs in default_mod, and the toml
+// forbids it in launch_arguments.
+wstring BuildTomlLaunchArguments(const wstring& existing);

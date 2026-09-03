@@ -9,6 +9,13 @@
 // playtime.h so all readers / writers see the same instance.
 map<wstring, PlaytimeRec> g_playtimes;
 
+// True once LoadPlaytimes has actually completed a read attempt.
+// SavePlaytimes rewrites the WHOLE file from the in-memory map, so if a
+// load ever failed and left the map empty, the next RecordPlaytime
+// would overwrite a good file with a single entry — silently destroying
+// the entire history. Saving is refused until a load has run.
+static bool g_playtimesLoaded = false;
+
 // Path helper — file-internal, not exposed in the header (no other
 // module needs to know where the cache lives).
 static wstring PlaytimeCachePath() {
@@ -21,6 +28,7 @@ static wstring PlaytimeCachePath() {
 // pull the three fields out of each object, drop into the map.
 void LoadPlaytimes() {
     g_playtimes.clear();
+    g_playtimesLoaded = true;   // a genuinely absent file is a valid state
     wstring j = ReadTextFile(PlaytimeCachePath());
     if (j.empty()) return;
     size_t arrStart = j.find(L"\"entries\"");
@@ -55,6 +63,8 @@ void LoadPlaytimes() {
 }
 
 void SavePlaytimes() {
+    // Refuse to write before a load has run — see g_playtimesLoaded.
+    if (!g_playtimesLoaded) return;
     wstring j;
     j += L"{\n  \"entries\": [\n";
     bool first = true;

@@ -494,6 +494,17 @@ void RefreshModDescriptionLinks() {
 void Layout(int W, int H) {
     using namespace LO;
 
+    // A minimized window reports a 0x0 client rect. WM_SIZE fires with
+    // SIZE_MINIMIZED on every launch (SW_SHOWMINNOACTIVE), so without
+    // this guard the whole layout gets recomputed from nothing —
+    // degenerate rects, children SetWindowPos'd to garbage positions,
+    // and any geometry derived from viewport height (scroll extents,
+    // visible-row counts) clamped against zero. Restoring recomputes
+    // the rects but not necessarily that derived state, which shows up
+    // as panels drawn at the wrong offset after coming back from
+    // minimized. There is nothing meaningful to lay out at 0x0, so
+    // don't try.
+    if (W <= 0 || H <= 0) return;
     // Callers (WM_SIZE, post-CreateControls init, etc.) pass PHYSICAL client
     // dimensions from GetClientRect or WM_SIZE's lparam. Convert to logical
     // at the top so the rest of Layout reads in a single coordinate system

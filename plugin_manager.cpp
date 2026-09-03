@@ -38,7 +38,9 @@
 #include "plugin_drop_ui.h"     // v1.6: HandlePluginManagerDrop (drag-drop)
 #include "plugin_install.h"     // v1.6: PeekZipKind, ZipKind (patch bundle routing)
 #include "readme_reader.h"      // v1.6: ShowReadmeReader
+#include "repo_browser.h"      // v1.6.2: ShowRepoBrowser
 #include "plugin_manifest.h"   // v1.3: friendly-name lookup
+#include "ui_state.h"        // v1.6.2: g_loaderOpts (extension gates)
 #include "core.h"            // g_hInst, g_dpiScale
 #include "scaling.h"         // S(), SF()
 #include "colors.h"          // Tok::Gold, Tok::crBgPanel, etc.
@@ -92,7 +94,19 @@ struct PMRow {
 static std::vector<PluginEntry> g_pluginList;
 static std::vector<PMRow>       g_pmRows;           // v1.3: visual rows in the listbox
 static HWND    g_pmHwnd      = nullptr;
-static HWND    g_pmList      = nullptr;
+// v1.6.2: the single list became TWO independently-scrolling lists so
+// the "Mod plugins" / "Global plugins" headers can stay pinned instead
+// of scrolling away as list rows. g_pmRows still holds every row in one
+// vector (so pluginIdx, rename and toggle paths are unchanged); the
+// lists just view different halves of it:
+//     mod rows    = [0, g_pmSplit)
+//     global rows = [g_pmSplit, g_pmRows.size())
+// Headers are no longer rows — they're painted by WM_PAINT.
+static HWND    g_pmListMod    = nullptr;
+static HWND    g_pmListGlobal = nullptr;
+static int     g_pmSplit      = 0;
+static bool    g_pmHasMod     = false;
+static bool    g_pmHasGlobal  = false;
 static HWND    g_pmSaveBtn   = nullptr;
 static HWND    g_pmCancelBtn = nullptr;
 static HWND    g_pmReadmesBtn = nullptr;   // v1.6: opens the readme picker
@@ -119,7 +133,7 @@ static wstring g_pmEmptyMessage;   // pre-rendered author / modname phrase
 // at popup creation via S() / g_dpiScale.
 constexpr int PM_W            = 480;
 constexpr int PM_H            = 480;
-constexpr int PM_TITLE_H      = 40;
+constexpr int PM_TITLE_H      = 56;   // two-line: "Plugin Manager" + mod name
 constexpr int PM_PAD          = 12;
 constexpr int PM_BTN_W        = 140;
 constexpr int PM_BTN_H        = 58;    // bottom-anchored — grows upward
@@ -291,44 +305,42 @@ static void BuildLegacyRows() {
     for (size_t i = 0; i < g_pluginList.size(); ++i) {
         if (g_pluginList[i].isGlobal) { firstGlobal = i; break; }
     }
-    bool hasMod    = firstGlobal > 0;
-    bool hasGlobal = firstGlobal < g_pluginList.size();
+    g_pmHasMod    = firstGlobal > 0;
+    g_pmHasGlobal = firstGlobal < g_pluginList.size();
 
-    if (hasMod) {
-        PMRow h; h.kind = PMRow::Kind::SectionHeader; h.text = L"Mod plugins";
-        g_pmRows.push_back(h);
-        for (size_t i = 0; i < firstGlobal; ++i) {
-            PMRow r;
-            r.kind      = PMRow::Kind::Plugin;
-            r.pluginIdx = (int)i;
-            r.text      = g_pluginList[i].fileName;
-            g_pmRows.push_back(r);
-        }
+    // No SectionHeader rows any more — the two headers are painted as
+    // static chrome above their lists, so they can't scroll away.
+    for (size_t i = 0; i < firstGlobal; ++i) {
+        PMRow r;
+        r.kind      = PMRow::Kind::Plugin;
+        r.pluginIdx = (int)i;
+        r.text      = g_pluginList[i].fileName;
+        g_pmRows.push_back(r);
     }
-    if (hasGlobal) {
-        PMRow h; h.kind = PMRow::Kind::SectionHeader; h.text = L"Global plugins";
-        g_pmRows.push_back(h);
-        for (size_t i = firstGlobal; i < g_pluginList.size(); ++i) {
-            PMRow r;
-            r.kind      = PMRow::Kind::Plugin;
-            r.pluginIdx = (int)i;
-            r.text      = g_pluginList[i].fileName;
-            g_pmRows.push_back(r);
-        }
+    g_pmSplit = (int)g_pmRows.size();
+    for (size_t i = firstGlobal; i < g_pluginList.size(); ++i) {
+        PMRow r;
+        r.kind      = PMRow::Kind::Plugin;
+        r.pluginIdx = (int)i;
+        r.text      = g_pluginList[i].fileName;
+        g_pmRows.push_back(r);
     }
 }
 
 // Manifest mode: g_pluginList stays empty (no toggleable state). Build
-// one "Mod plugins" header followed by one Manifest row per manifest
-// entry, marking entries whose corresponding `found` flag is false so
-// PMDrawItem can grey them out.
+// one Manifest row per manifest entry, marking entries whose
+// corresponding `found` flag is false so PMDrawItem can grey them out.
+// Manifest mode is always mod-scoped, so everything lands in the mod
+// list and the global list stays absent.
 static void BuildConfigRows(const PluginConfig& mf,
                               const vector<bool>&   found) {
     g_pmRows.clear();
+    g_pmSplit     = 0;
+    g_pmHasMod    = false;
+    g_pmHasGlobal = false;
     if (mf.plugins.empty()) return;   // empty manifest → no rows; WM_PAINT handles the message
 
-    PMRow h; h.kind = PMRow::Kind::SectionHeader; h.text = L"Mod plugins";
-    g_pmRows.push_back(h);
+    g_pmHasMod = true;
 
     for (size_t i = 0; i < mf.plugins.size(); ++i) {
         PMRow r;
@@ -337,6 +349,278 @@ static void BuildConfigRows(const PluginConfig& mf,
         r.isMissing = (i < found.size()) ? !found[i] : true;
         g_pmRows.push_back(r);
     }
+    // Every manifest row is mod-scoped: split sits at the end so the
+    // global list resolves to an empty range.
+    g_pmSplit = (int)g_pmRows.size();
+}
+
+// ── Two-list geometry + row-range helpers (v1.6.2) ───────────────────
+
+constexpr int PM_SECTION_H   = 22;   // static header band above each list
+constexpr int PM_SECTION_GAP = 10;   // gap between the two sections
+constexpr int PM_IDC_LIST_MOD    = 100;   // was the single list's ID
+constexpr int PM_IDC_LIST_GLOBAL = 101;
+
+// ── Themed scrollbars (v1.6.2) ───────────────────────────────────────
+// The lists dropped WS_VSCROLL — the stock bar is a bright system
+// control that reads as a hole in the stone. Instead each list gets a
+// painted gutter beside it, drawn by the popup's WM_PAINT from the same
+// scroll_up / scroll_down / scrollbar_track / scroll.png assets the mod
+// list uses. All dimensions are NATIVE asset pixels, never scaled by
+// g_dpiScale: the art is blitted at native size, so scaling the gutter
+// would push the arrow caps out of line with the track.
+constexpr int PM_SB_W         = 30;   // gutter width (asset native)
+constexpr int PM_SB_GAP       = 4;    // gap between the list and its gutter
+constexpr int PM_SB_THUMB_W   = 15;
+constexpr int PM_SB_MIN_THUMB = 40;
+constexpr int PM_SB_THUMB_CAP = 16;
+constexpr int PM_SB_UP_H_FB   = 35;
+constexpr int PM_SB_DOWN_H_FB = 32;
+
+// Where each header and list sits, in physical client coordinates.
+// WM_PAINT and the creation path both call this so the painted headers
+// and the real child windows can't drift apart.
+struct PMListGeom {
+    bool hasMod = false, hasGlobal = false;
+    RECT modHdr = {}, modList = {}, globHdr = {}, globList = {};
+    // Painted gutters. Only valid when the matching needsSb flag is
+    // set; when a list fits entirely, no gutter is drawn and the list
+    // keeps the full width.
+    bool modNeedsSb = false, globNeedsSb = false;
+    RECT modBar = {}, globBar = {};
+};
+
+static PMListGeom PMComputeListGeom(int physW, int physH) {
+    PMListGeom gm;
+    gm.hasMod    = g_pmHasMod;
+    gm.hasGlobal = g_pmHasGlobal;
+
+    int listX = (int)(PM_PAD * g_dpiScale);
+    int listW = physW - 2 * listX;
+    int top   = (int)((PM_TITLE_H + PM_LIST_PAD_TOP) * g_dpiScale);
+    int bot   = physH - (int)((PM_PAD + PM_BTN_H + PM_LIST_PAD_BOT) * g_dpiScale);
+    int avail = bot - top;
+    if (avail < 0) avail = 0;
+
+    int hdrH = (int)(PM_SECTION_H * g_dpiScale);
+    int gap  = (int)(PM_SECTION_GAP * g_dpiScale);
+    int rowH = (int)(PM_ROW_H * g_dpiScale);
+
+    int modCount  = g_pmSplit;
+    int globCount = (int)g_pmRows.size() - g_pmSplit;
+
+    if (gm.hasMod && gm.hasGlobal) {
+        // Split the leftover space in proportion to how many rows each
+        // side actually has, so a 20-plugin mod list doesn't get the
+        // same height as a 2-entry global list. Each side keeps room
+        // for at least two rows so neither collapses to a sliver.
+        int space = avail - 2 * hdrH - gap;
+        if (space < 0) space = 0;
+        int minH  = rowH * 2;
+        int total = modCount + globCount;
+        int modH  = (total > 0) ? space * modCount / total : space / 2;
+        if (modH < minH)          modH = minH;
+        if (modH > space - minH)  modH = space - minH;
+        if (modH < 0)             modH = 0;
+        int globH = space - modH;
+        if (globH < 0) globH = 0;
+
+        int y = top;
+        gm.modHdr  = { listX, y, listX + listW, y + hdrH };  y += hdrH;
+        gm.modList = { listX, y, listX + listW, y + modH };  y += modH + gap;
+        gm.globHdr = { listX, y, listX + listW, y + hdrH };  y += hdrH;
+        gm.globList= { listX, y, listX + listW, y + globH };
+    } else if (gm.hasMod || gm.hasGlobal) {
+        // Only one section — it takes the whole band.
+        int y = top;
+        RECT hdr  = { listX, y, listX + listW, y + hdrH };
+        RECT list = { listX, y + hdrH, listX + listW, bot };
+        if (gm.hasMod) { gm.modHdr = hdr; gm.modList = list; }
+        else           { gm.globHdr = hdr; gm.globList = list; }
+    }
+
+    // Decide which lists overflow, and carve their gutter out of the
+    // right edge of the list rect. Done last so it applies to both the
+    // split and single-section layouts above.
+    auto reserve = [&](RECT& listRc, RECT& barRc, bool& needs, int count) {
+        needs = false;
+        if (count <= 0) return;
+        int h = listRc.bottom - listRc.top;
+        if (h <= 0 || rowH <= 0) return;
+        int visible = h / rowH;
+        if (count <= visible) return;      // fits — no gutter
+        needs = true;
+        barRc = { listRc.right - PM_SB_W, listRc.top,
+                  listRc.right, listRc.bottom };
+        listRc.right -= (PM_SB_W + PM_SB_GAP);
+        if (listRc.right < listRc.left) listRc.right = listRc.left;
+    };
+    if (gm.hasMod)
+        reserve(gm.modList, gm.modBar, gm.modNeedsSb, modCount);
+    if (gm.hasGlobal)
+        reserve(gm.globList, gm.globBar, gm.globNeedsSb, globCount);
+
+    return gm;
+}
+
+// ── Themed scrollbar for a listbox ───────────────────────────────────
+// The listbox scrolls by ITEM (LB_SETTOPINDEX), so the bar works in row
+// units rather than pixels: topIndex ranges 0..(count - visibleRows).
+
+struct PMSbGeom {
+    bool present = false;
+    RECT area = {}, up = {}, down = {}, track = {}, thumb = {};
+    int  trackTop = 0, trackH = 0;
+    int  visible = 0, maxTop = 0, topIndex = 0;
+};
+
+static PMSbGeom PMScrollbarGeom(HWND lb, const RECT& bar, int count) {
+    PMSbGeom s;
+    if (!lb || count <= 0) return s;
+    int rowH = (int)(PM_ROW_H * g_dpiScale);
+    int h = bar.bottom - bar.top;
+    if (h <= 0 || rowH <= 0) return s;
+
+    s.visible = h / rowH;
+    if (s.visible < 1) s.visible = 1;
+    s.maxTop = count - s.visible;
+    if (s.maxTop < 0) s.maxTop = 0;
+    s.topIndex = (int)SendMessage(lb, LB_GETTOPINDEX, 0, 0);
+    if (s.topIndex < 0) s.topIndex = 0;
+    if (s.topIndex > s.maxTop) s.topIndex = s.maxTop;
+
+    int upH = PM_SB_UP_H_FB, downH = PM_SB_DOWN_H_FB;
+    if (Gdiplus::Bitmap* a = AssetImage(L"scroll_up.png"))   upH   = (int)a->GetHeight();
+    if (Gdiplus::Bitmap* a = AssetImage(L"scroll_down.png")) downH = (int)a->GetHeight();
+
+    s.present = true;
+    s.area = bar;
+    s.up   = { bar.left, bar.top,           bar.right, bar.top + upH };
+    s.down = { bar.left, bar.bottom - downH, bar.right, bar.bottom };
+
+    s.trackTop = (int)bar.top + upH;
+    int trackBot = (int)bar.bottom - downH;
+    s.trackH = trackBot - s.trackTop;
+    if (s.trackH < 0) s.trackH = 0;
+    s.track = { bar.left, s.trackTop, bar.right, trackBot };
+
+    int thumbH;
+    if (s.maxTop <= 0 || s.trackH <= PM_SB_MIN_THUMB) {
+        thumbH = s.trackH;
+    } else {
+        thumbH = (int)((long long)s.trackH * s.visible / count);
+        if (thumbH < PM_SB_MIN_THUMB) thumbH = PM_SB_MIN_THUMB;
+        if (thumbH > s.trackH)        thumbH = s.trackH;
+    }
+    int thumbTop = s.trackTop;
+    if (s.maxTop > 0) {
+        int travel = s.trackH - thumbH;
+        if (travel > 0) {
+            thumbTop = s.trackTop
+                     + (int)((long long)s.topIndex * travel / s.maxTop);
+            if (thumbTop < s.trackTop)          thumbTop = s.trackTop;
+            if (thumbTop > s.trackTop + travel) thumbTop = s.trackTop + travel;
+        }
+    }
+    int thumbX = (int)bar.left + (PM_SB_W - PM_SB_THUMB_W) / 2;
+    s.thumb = { thumbX, thumbTop, thumbX + PM_SB_THUMB_W, thumbTop + thumbH };
+    return s;
+}
+
+// Vertical 3-slice so the grip's finished ends stay sharp.
+static void PMDrawThumb(Gdiplus::Graphics& g, Gdiplus::Bitmap* b,
+                        int x, int y, int w, int h, int cap) {
+    if (!b) return;
+    int sw = (int)b->GetWidth(), sh = (int)b->GetHeight();
+    if (h >= sh && h > cap * 2 && sh > cap * 2) {
+        g.DrawImage(b, Gdiplus::Rect(x, y, w, cap), 0, 0, sw, cap, Gdiplus::UnitPixel);
+        g.DrawImage(b, Gdiplus::Rect(x, y + cap, w, h - cap * 2),
+                    0, cap, sw, sh - cap * 2, Gdiplus::UnitPixel);
+        g.DrawImage(b, Gdiplus::Rect(x, y + h - cap, w, cap),
+                    0, sh - cap, sw, cap, Gdiplus::UnitPixel);
+    } else {
+        g.DrawImage(b, Gdiplus::Rect(x, y, w, h), 0, 0, sw, sh, Gdiplus::UnitPixel);
+    }
+}
+
+static void PMPaintScrollbar(Gdiplus::Graphics& g, const PMSbGeom& s) {
+    if (!s.present) return;
+    int aw = (int)(s.area.right - s.area.left);
+    int ah = (int)(s.area.bottom - s.area.top);
+
+    if (Gdiplus::Bitmap* tk = AssetImage(L"scrollbar_track.png")) {
+        g.DrawImage(tk, Gdiplus::Rect((INT)s.area.left, (INT)s.area.top, (INT)aw, (INT)ah),
+                    0, 0, (INT)tk->GetWidth(), (INT)tk->GetHeight(), Gdiplus::UnitPixel);
+    } else {
+        Gdiplus::SolidBrush groove(Gdiplus::Color(150, 0x10, 0x0A, 0x06));
+        g.FillRectangle(&groove, (INT)s.area.left, (INT)s.area.top, (INT)aw, (INT)ah);
+    }
+
+    int tw = (int)(s.thumb.right - s.thumb.left);
+    int th = (int)(s.thumb.bottom - s.thumb.top);
+    if (Gdiplus::Bitmap* tb = AssetImage(L"scroll.png")) {
+        PMDrawThumb(g, tb, (INT)s.thumb.left, (INT)s.thumb.top,
+                    tw, th, PM_SB_THUMB_CAP);
+    } else {
+        Gdiplus::SolidBrush grip(Tok::BronzeBright);
+        g.FillRectangle(&grip, (INT)s.thumb.left, (INT)s.thumb.top, (INT)tw, (INT)th);
+    }
+
+    if (Gdiplus::Bitmap* up = AssetImage(L"scroll_up.png"))
+        g.DrawImage(up, (INT)s.up.left, (INT)s.up.top,
+                    (INT)up->GetWidth(), (INT)up->GetHeight());
+    if (Gdiplus::Bitmap* dn = AssetImage(L"scroll_down.png"))
+        g.DrawImage(dn, (INT)s.down.left, (INT)s.down.top,
+                    (INT)dn->GetWidth(), (INT)dn->GetHeight());
+}
+
+// Repaint ONLY a list's scrollbar gutter on the popup.
+//
+// The gutter is painted by the popup rather than the listbox, so moving
+// the thumb needs a parent repaint — but invalidating the whole parent
+// repaints every owner-drawn button too, which is exactly the
+// full-window-invalidate flicker this codebase avoids everywhere else.
+// Scoping it to the bar rect keeps the buttons untouched.
+static void PMInvalidateBar(HWND lb) {
+    if (!g_pmHwnd || !lb) return;
+    RECT rc; GetClientRect(g_pmHwnd, &rc);
+    PMListGeom gm = PMComputeListGeom(rc.right, rc.bottom);
+    bool isGlobal = (lb == g_pmListGlobal);
+    bool needs = isGlobal ? gm.globNeedsSb : gm.modNeedsSb;
+    if (!needs) return;
+    RECT bar = isGlobal ? gm.globBar : gm.modBar;
+    InvalidateRect(g_pmHwnd, &bar, FALSE);
+}
+
+// Thumb-drag state. Only one bar can be dragged at a time.
+static HWND g_pmSbDragList = nullptr;
+static int  g_pmSbGrabDY   = 0;
+
+// ── Extension gates (D2RLoader 1.1.0) ────────────────────────────────
+// allow_global_extensions / allow_mod_extensions decide whether D2RLoader
+// loads plugins at all. With one off, everything in that section is
+// inert in game no matter what the checkboxes here say — so installing
+// through this manager or the Repository Browser appears to succeed and
+// then silently does nothing. Surface it on the section itself, since
+// the two toml keys map exactly onto the two lists.
+static bool PMModGateOff()    { return !g_loaderOpts.allowModExtensions; }
+static bool PMGlobalGateOff() { return !g_loaderOpts.allowGlobalExtensions; }
+
+// True when the rows in this listbox belong to a section whose gate is
+// off — PMDrawItem dims them so a disabled section reads as inert.
+static bool PMListGateOff(HWND lb) {
+    return (lb == g_pmListGlobal) ? PMGlobalGateOff() : PMModGateOff();
+}
+
+// A listbox's window handle tells us which half of g_pmRows it shows.// Every row lookup goes through these so the two lists stay honest
+// about which underlying rows they own.
+static int PMBaseFor(HWND lb) {
+    return (lb == g_pmListGlobal) ? g_pmSplit : 0;
+}
+static int PMCountFor(HWND lb) {
+    return (lb == g_pmListGlobal)
+           ? (int)g_pmRows.size() - g_pmSplit
+           : g_pmSplit;
 }
 
 // Format the empty-manifest message. If both author and mod name are
@@ -373,8 +657,13 @@ static LRESULT CALLBACK PMListSubclass(HWND hw, UINT msg,
                                        WPARAM wp, LPARAM lp,
                                        UINT_PTR /*id*/, DWORD_PTR /*data*/) {
     auto toggle = [&](int idx) {
-        if (idx < 0 || idx >= (int)g_pmRows.size()) return;
-        const PMRow& row = g_pmRows[idx];
+        // idx is a listbox item index; shift it into g_pmRows space by
+        // whichever half this listbox is showing.
+        int base   = PMBaseFor(hw);
+        int absIdx = base + idx;
+        if (idx < 0 || idx >= PMCountFor(hw)) return;
+        if (absIdx < 0 || absIdx >= (int)g_pmRows.size()) return;
+        const PMRow& row = g_pmRows[absIdx];
         // Only Plugin-kind rows participate in toggle. Section headers
         // and (read-only) Manifest rows ignore the click.
         if (row.kind != PMRow::Kind::Plugin) return;
@@ -391,6 +680,46 @@ static LRESULT CALLBACK PMListSubclass(HWND hw, UINT msg,
     };
 
     switch (msg) {
+
+    // Row backgrounds are sampled from bg_stone by SCREEN position, so
+    // the texture is meant to sit still while rows move over it. The
+    // listbox's default scroll does the opposite: it bitblts the
+    // existing pixels upward (dragging the stone with them) and only
+    // repaints the newly exposed row. The two then disagree and the
+    // pattern visibly breaks apart. Forcing a full repaint after any
+    // scroll costs one extra blit and keeps the stone continuous.
+    case WM_VSCROLL:
+    case WM_MOUSEWHEEL: {
+        if (msg == WM_MOUSEWHEEL) {
+            // With WS_VSCROLL removed, don't rely on the listbox's
+            // default wheel handling — drive the top index directly so
+            // the wheel works whether or not the stock bar would have.
+            int count   = PMCountFor(hw);
+            RECT lrc; GetClientRect(hw, &lrc);
+            int rowH    = (int)(PM_ROW_H * g_dpiScale);
+            int visible = (rowH > 0) ? (int)(lrc.bottom / rowH) : 1;
+            if (visible < 1) visible = 1;
+            int maxTop  = count - visible;
+            if (maxTop < 0) maxTop = 0;
+            int top = (int)SendMessage(hw, LB_GETTOPINDEX, 0, 0);
+            int delta = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+            top -= delta * 3;                 // 3 rows per notch
+            if (top < 0)      top = 0;
+            if (top > maxTop) top = maxTop;
+            SendMessage(hw, LB_SETTOPINDEX, (WPARAM)top, 0);
+            InvalidateRect(hw, nullptr, FALSE);
+            PMInvalidateBar(hw);
+            return 0;
+        }
+        LRESULT r = DefSubclassProc(hw, msg, wp, lp);
+        InvalidateRect(hw, nullptr, FALSE);
+        // The gutter is painted by the POPUP, not the listbox, so the
+        // thumb won't move unless the parent repaints too — but only
+        // the bar rect, never the whole popup.
+        PMInvalidateBar(hw);
+        return r;
+    }
+
     case WM_LBUTTONDOWN:
     case WM_LBUTTONDBLCLK: {
         // v1.3: rows are effectively non-selectable — only the checkbox
@@ -434,11 +763,14 @@ static LRESULT CALLBACK PMListSubclass(HWND hw, UINT msg,
                                       MAKELPARAM(cli.x, cli.y));
         int rowIdx = -1;
         if (HIWORD(packed) == 0) rowIdx = LOWORD(packed);
-        if (rowIdx < 0 || rowIdx >= (int)g_pmRows.size()) return 0;
+        if (rowIdx < 0 || rowIdx >= PMCountFor(hw)) return 0;
+        // Shift into g_pmRows space for whichever list was clicked.
+        int absIdx = PMBaseFor(hw) + rowIdx;
+        if (absIdx < 0 || absIdx >= (int)g_pmRows.size()) return 0;
 
         // Section headers can't be renamed — only plugin filename rows
         // (legacy or manifest-mode read-only entries) are valid targets.
-        const PMRow& row = g_pmRows[rowIdx];
+        const PMRow& row = g_pmRows[absIdx];
         wstring dllName;
         if (row.kind == PMRow::Kind::Plugin) {
             if (row.pluginIdx >= 0
@@ -506,10 +838,28 @@ static LRESULT CALLBACK PMListSubclass(HWND hw, UINT msg,
 // stone painted by WM_PAINT — no visible seam at the listbox edge),
 // and checkboxes use the checkbox.png / checkbox_checked.png asset
 // family via DrawFlagCheckbox, matching the launch-options section.
+// v1.6.2: if this section's D2RLoader extension gate is off, mute the
+// whole row. The checkbox still reflects the on-disk state and still
+// toggles — the file move is real — but nothing in this section loads
+// in game until the gate is turned back on, and the row should look
+// that way. Applied to both Plugin and Manifest rows.
+static void PMMuteIfGated(Gdiplus::Graphics& g, DRAWITEMSTRUCT* di,
+                          int rowW, int rowH) {
+    if (!PMListGateOff(di->hwndItem)) return;
+    Gdiplus::SolidBrush mute(Gdiplus::Color(150, 20, 16, 12));
+    g.FillRectangle(&mute, (INT)di->rcItem.left, (INT)di->rcItem.top,
+                    (INT)rowW, (INT)rowH);
+}
+
 static void PMDrawItem(DRAWITEMSTRUCT* di) {
+    // di->itemID is an index within THIS listbox; shift it into
+    // g_pmRows space by whichever half the listbox owns.
+    int base   = PMBaseFor(di->hwndItem);
+    int absIdx = base + (int)di->itemID;
     if ((int)di->itemID < 0
-        || (int)di->itemID >= (int)g_pmRows.size()) return;
-    const PMRow& row = g_pmRows[di->itemID];
+        || (int)di->itemID >= PMCountFor(di->hwndItem)) return;
+    if (absIdx < 0 || absIdx >= (int)g_pmRows.size()) return;
+    const PMRow& row = g_pmRows[absIdx];
 
     bool selected = (di->itemState & ODS_SELECTED) != 0;
     bool focused  = (di->itemState & ODS_FOCUS)    != 0;
@@ -517,10 +867,12 @@ static void PMDrawItem(DRAWITEMSTRUCT* di) {
     // Compute this row's offset within the popup client area so we can
     // sample bg_stone.png at the same coordinates used by the popup's
     // own WM_PAINT (which crops the stone at 40,40 into rect(0,0,W,H)).
-    // The listbox lives at (PM_PAD, PM_TITLE_H + PM_LIST_PAD_TOP), so
-    // adding those to di->rcItem gives us the row's popup coords.
-    int listX_phys = (int)(PM_PAD * g_dpiScale);
-    int listY_phys = (int)((PM_TITLE_H + PM_LIST_PAD_TOP) * g_dpiScale);
+    // With two lists at different Y positions the old hardcoded offset
+    // no longer works, so ask Windows where this listbox actually is.
+    POINT listOrigin = { 0, 0 };
+    MapWindowPoints(di->hwndItem, g_pmHwnd, &listOrigin, 1);
+    int listX_phys = listOrigin.x;
+    int listY_phys = listOrigin.y;
     int rowW = di->rcItem.right  - di->rcItem.left;
     int rowH = di->rcItem.bottom - di->rcItem.top;
 
@@ -600,6 +952,7 @@ static void PMDrawItem(DRAWITEMSTRUCT* di) {
         // XOR the old rect back off. The selection overlay above is
         // enough focus feedback for the pointer path; keyboard nav
         // is still visible via the selection state.
+        PMMuteIfGated(g, di, rowW, rowH);
         return;
     }
 
@@ -661,6 +1014,8 @@ static void PMDrawItem(DRAWITEMSTRUCT* di) {
               DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     // v1.3: no DrawFocusRect — see Manifest row above for rationale.
     // Selection overlay is enough visual feedback for the focused row.
+
+    PMMuteIfGated(g, di, rowW, rowH);
 }
 
 // ── Themed dialog button paint (Save / Cancel) ───────────────────────
@@ -735,16 +1090,32 @@ static void RefreshPluginManagerContents() {
     }
 
     // Refill the listbox to match the rebuilt rows. If the list was empty
-    // before (manifest-empty mode) g_pmList may be null — in that case a
+    // before (manifest-empty mode) the lists may be null — in that case a
     // repaint of the popup shows the message; nothing to refill.
-    if (g_pmList) {
-        SendMessageW(g_pmList, LB_RESETCONTENT, 0, 0);
-        for (size_t i = 0; i < g_pmRows.size(); ++i)
-            SendMessageW(g_pmList, LB_ADDSTRING, 0,
-                         (LPARAM)g_pmRows[i].text.c_str());
-        SendMessageW(g_pmList, LB_SETITEMHEIGHT, 0,
-                     (LPARAM)(int)(PM_ROW_H * g_dpiScale));
-        InvalidateRect(g_pmList, nullptr, TRUE);
+    // Refill BOTH lists from their halves of the rebuilt row vector.
+    // A rescan can change which sections exist, so re-run the geometry
+    // and move/show the lists to match before repopulating.
+    {
+        RECT crc; GetClientRect(g_pmHwnd, &crc);
+        PMListGeom gm = PMComputeListGeom(crc.right, crc.bottom);
+        auto refill = [&](HWND lb, const RECT& r, bool present,
+                          int from, int to) {
+            if (!lb) return;
+            if (!present) { ShowWindow(lb, SW_HIDE); return; }
+            MoveWindow(lb, r.left, r.top,
+                       r.right - r.left, r.bottom - r.top, TRUE);
+            ShowWindow(lb, SW_SHOW);
+            SendMessageW(lb, LB_RESETCONTENT, 0, 0);
+            for (int i = from; i < to; ++i)
+                SendMessageW(lb, LB_ADDSTRING, 0,
+                             (LPARAM)g_pmRows[i].text.c_str());
+            SendMessageW(lb, LB_SETITEMHEIGHT, 0,
+                         (LPARAM)(int)(PM_ROW_H * g_dpiScale));
+            InvalidateRect(lb, nullptr, TRUE);
+        };
+        refill(g_pmListMod, gm.modList, gm.hasMod, 0, g_pmSplit);
+        refill(g_pmListGlobal, gm.globList, gm.hasGlobal,
+               g_pmSplit, (int)g_pmRows.size());
     }
     InvalidateRect(g_pmHwnd, nullptr, FALSE);
 }
@@ -837,23 +1208,31 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
                 g.DrawRectangle(&fallback, 1, 1, W - 3, H - 3);
             }
 
-            // Title — uses g_fNavSm + GDI+ so AA + ClearType matches the
-            // launcher's body. Falls back silently if fonts haven't loaded.
+            // Title — left-justified "Plugin Manager" 15px from the window
+            // edge, with the mod name on a second line beneath it. Two lines
+            // keep it clear of the Repository button in the top-right corner.
             Gdiplus::SolidBrush titleBr(Tok::Gold);
             Gdiplus::StringFormat sf;
-            sf.SetAlignment(Gdiplus::StringAlignmentCenter);
-            sf.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-
-            wstring title = L"Plugin Manager";
-            if (!g_pmModName.empty()) title += L" \u2014 " + g_pmModName;
+            sf.SetAlignment(Gdiplus::StringAlignmentNear);
+            sf.SetLineAlignment(Gdiplus::StringAlignmentNear);
 
             Gdiplus::Font* tf = g_fModName ? g_fModName : g_fNavSm;
             if (tf) {
-                g.DrawString(title.c_str(), -1, tf,
-                    Gdiplus::RectF((REAL)rc.left, (REAL)S(10),
-                                   (REAL)(rc.right - rc.left),
-                                   (REAL)S(PM_TITLE_H - 10)),
+                int tx = (int)(15 * g_dpiScale);   // 15px from the window edge
+                g.DrawString(L"Plugin Manager", -1, tf,
+                    Gdiplus::RectF((REAL)tx, (REAL)S(8),
+                                   (REAL)(rc.right - rc.left - tx),
+                                   (REAL)S(26)),
                     &sf, &titleBr);
+                if (!g_pmModName.empty()) {
+                    Gdiplus::SolidBrush subBr(Gdiplus::Color(0xC8, 0xB4, 0x84));
+                    Gdiplus::Font* sub = g_fNavSm ? g_fNavSm : tf;
+                    g.DrawString(g_pmModName.c_str(), -1, sub,
+                        Gdiplus::RectF((REAL)tx, (REAL)S(32),
+                                       (REAL)(rc.right - rc.left - tx),
+                                       (REAL)S(22)),
+                        &sf, &subBr);
+                }
             }
 
             // v1.3: when the active manifest is empty (modder explicitly
@@ -874,6 +1253,73 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
                                  msgRect, &sf, &msgBr);
                 }
             }
+
+            // v1.6.2: static section headers. These used to be rows
+            // inside the listbox, which meant they scrolled out of view
+            // as soon as the list was long enough to scroll. Painting
+            // them on the popup pins them above their list.
+            if (!g_pmConfigEmpty) {
+                PMListGeom gm = PMComputeListGeom(W, H);
+                Gdiplus::Font* hf = g_fNavSm ? g_fNavSm : g_fBtn;
+                Gdiplus::SolidBrush hdrBr(Tok::Gold);
+                Gdiplus::StringFormat sfH;
+                sfH.SetAlignment(Gdiplus::StringAlignmentNear);
+                sfH.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                sfH.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+                Gdiplus::Pen rule(Tok::BronzeDim, 1.0f);
+                Gdiplus::Pen warnRule(Tok::RedDark, 1.0f);
+
+                auto header = [&](const RECT& r, const wchar_t* text,
+                                  bool gateOff) {
+                    if (hf) {
+                        g.DrawString(text, -1, hf,
+                            Gdiplus::RectF((REAL)(r.left + S(4)), (REAL)r.top,
+                                           (REAL)((r.right - r.left) - S(8)),
+                                           (REAL)(r.bottom - r.top)),
+                            &sfH, &hdrBr);
+                        // v1.6.2: when the matching D2RLoader extension
+                        // gate is off, nothing in this section loads in
+                        // game. Say so on the section itself rather
+                        // than in a banner — the warning is only
+                        // meaningful next to the list it applies to.
+                        if (gateOff) {
+                            Gdiplus::StringFormat sfR;
+                            sfR.SetAlignment(Gdiplus::StringAlignmentFar);
+                            sfR.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                            sfR.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
+                            sfR.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
+                            Gdiplus::SolidBrush warn(Tok::RedBright);
+                            g.DrawString(L"NOT LOADING \u2014 see Loader Options",
+                                         -1, hf,
+                                Gdiplus::RectF((REAL)(r.left + S(4)), (REAL)r.top,
+                                               (REAL)((r.right - r.left) - S(8)),
+                                               (REAL)(r.bottom - r.top)),
+                                &sfR, &warn);
+                        }
+                    }
+                    // Hairline under the label, matching the rule the
+                    // old SectionHeader row drew.
+                    g.DrawLine(gateOff ? &warnRule : &rule,
+                               (INT)r.left, (INT)(r.bottom - 1),
+                               (INT)r.right, (INT)(r.bottom - 1));
+                };
+
+                if (gm.hasMod)    header(gm.modHdr,  L"Mod plugins",
+                                         PMModGateOff());
+                if (gm.hasGlobal) header(gm.globHdr, L"Global plugins",
+                                         PMGlobalGateOff());
+
+                // Themed gutters beside whichever lists overflow.
+                if (gm.hasMod && gm.modNeedsSb) {
+                    PMPaintScrollbar(g, PMScrollbarGeom(
+                        g_pmListMod, gm.modBar, g_pmSplit));
+                }
+                if (gm.hasGlobal && gm.globNeedsSb) {
+                    PMPaintScrollbar(g, PMScrollbarGeom(
+                        g_pmListGlobal, gm.globBar,
+                        (int)g_pmRows.size() - g_pmSplit));
+                }
+            }
         }
 
         BitBlt(hdc, 0, 0, W, H, memDC, 0, 0, SRCCOPY);
@@ -885,9 +1331,100 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
         return 0;
     }
 
+    case WM_LBUTTONDOWN: {
+        // Scrollbar gutters live on the popup, not inside the lists,
+        // so the popup owns their hit-testing.
+        POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+        RECT rc; GetClientRect(hw, &rc);
+        if (g_pmConfigEmpty) break;
+        PMListGeom gm = PMComputeListGeom(rc.right, rc.bottom);
+
+        struct BarRef { HWND lb; RECT bar; int count; bool on; };
+        BarRef bars[2] = {
+            { g_pmListMod,    gm.modBar,  g_pmSplit,
+              gm.hasMod && gm.modNeedsSb },
+            { g_pmListGlobal, gm.globBar, (int)g_pmRows.size() - g_pmSplit,
+              gm.hasGlobal && gm.globNeedsSb },
+        };
+
+        for (int b = 0; b < 2; ++b) {
+            if (!bars[b].on || !bars[b].lb) continue;
+            PMSbGeom s = PMScrollbarGeom(bars[b].lb, bars[b].bar, bars[b].count);
+            if (!s.present) continue;
+            if (!PtInRect(&s.area, pt)) continue;
+
+            int newTop = s.topIndex;
+            if (PtInRect(&s.thumb, pt) && s.maxTop > 0) {
+                g_pmSbDragList = bars[b].lb;
+                g_pmSbGrabDY   = pt.y - (int)s.thumb.top;
+                SetCapture(hw);
+                return 0;
+            } else if (PtInRect(&s.up, pt)) {
+                newTop = s.topIndex - 1;
+            } else if (PtInRect(&s.down, pt)) {
+                newTop = s.topIndex + 1;
+            } else if (PtInRect(&s.track, pt)) {
+                newTop = (pt.y < s.thumb.top)
+                       ? s.topIndex - s.visible
+                       : s.topIndex + s.visible;
+            } else {
+                return 0;
+            }
+            if (newTop < 0)        newTop = 0;
+            if (newTop > s.maxTop) newTop = s.maxTop;
+            if (newTop != s.topIndex) {
+                SendMessage(bars[b].lb, LB_SETTOPINDEX, (WPARAM)newTop, 0);
+                InvalidateRect(bars[b].lb, nullptr, FALSE);
+                PMInvalidateBar(bars[b].lb);
+            }
+            return 0;
+        }
+        break;
+    }
+
+    case WM_MOUSEMOVE: {
+        if (!g_pmSbDragList) break;
+        RECT rc; GetClientRect(hw, &rc);
+        PMListGeom gm = PMComputeListGeom(rc.right, rc.bottom);
+        bool isGlobal = (g_pmSbDragList == g_pmListGlobal);
+        RECT bar   = isGlobal ? gm.globBar : gm.modBar;
+        int  count = isGlobal ? (int)g_pmRows.size() - g_pmSplit : g_pmSplit;
+        PMSbGeom s = PMScrollbarGeom(g_pmSbDragList, bar, count);
+        if (s.present && s.maxTop > 0) {
+            int thumbH = (int)(s.thumb.bottom - s.thumb.top);
+            int travel = s.trackH - thumbH;
+            if (travel > 0) {
+                int newTop = GET_Y_LPARAM(lp) - g_pmSbGrabDY;
+                if (newTop < s.trackTop)          newTop = s.trackTop;
+                if (newTop > s.trackTop + travel) newTop = s.trackTop + travel;
+                int idx = (int)((long long)(newTop - s.trackTop)
+                                * s.maxTop / travel);
+                if (idx < 0)        idx = 0;
+                if (idx > s.maxTop) idx = s.maxTop;
+                if (idx != s.topIndex) {
+                    SendMessage(g_pmSbDragList, LB_SETTOPINDEX, (WPARAM)idx, 0);
+                    InvalidateRect(g_pmSbDragList, nullptr, FALSE);
+                }
+                PMInvalidateBar(g_pmSbDragList);
+            }
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONUP: {
+        if (g_pmSbDragList) {
+            HWND wasDragging = g_pmSbDragList;
+            g_pmSbDragList = nullptr;
+            ReleaseCapture();
+            PMInvalidateBar(wasDragging);
+        }
+        return 0;
+    }
+
     case WM_DRAWITEM: {
         DRAWITEMSTRUCT* di = (DRAWITEMSTRUCT*)lp;
-        if (di->CtlID == 100) {              // listbox row
+        if (di->CtlID == PM_IDC_LIST_MOD
+            || di->CtlID == PM_IDC_LIST_GLOBAL) {   // listbox row
             PMDrawItem(di);
             return TRUE;
         }
@@ -925,6 +1462,10 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
             ShowReadmePicker(hw);
             return 0;
         }
+        if (id == 51) {          // v1.6.2: Repository browser
+            ShowRepoBrowser(hw, g_pmModFolder);
+            return 0;
+        }
         return 0;
     }
 
@@ -942,11 +1483,20 @@ static LRESULT CALLBACK PluginManagerProc(HWND hw, UINT msg,
             EnableWindow(parent, TRUE);
             SetForegroundWindow(parent);
         }
-        if (g_pmList) {
-            RemoveWindowSubclass(g_pmList, PMListSubclass, 1);
+        if (g_pmListGlobal) {
+            RemoveWindowSubclass(g_pmListGlobal, PMListSubclass, 1);
+        }
+        if (g_pmListMod) {
+            RemoveWindowSubclass(g_pmListMod, PMListSubclass, 1);
         }
         g_pmHwnd      = nullptr;
-        g_pmList      = nullptr;
+        if (g_pmSbDragList) { g_pmSbDragList = nullptr; ReleaseCapture(); }
+        g_pmSbGrabDY   = 0;
+        g_pmListMod    = nullptr;
+        g_pmListGlobal = nullptr;
+        g_pmSplit      = 0;
+        g_pmHasMod     = false;
+        g_pmHasGlobal  = false;
         g_pmSaveBtn   = nullptr;
         g_pmCancelBtn = nullptr;
         g_pmReadmesBtn = nullptr;
@@ -1126,36 +1676,53 @@ void ShowPluginManager(HWND parent,
     // (see the WM_DROPFILES handler in PluginManagerProc).
     DragAcceptFiles(g_pmHwnd, TRUE);
 
-    // Owner-drawn LISTBOX. Sized to fill the area between the title
-    // band and the button row, padded by PM_PAD on each side. Skipped
-    // in empty-manifest mode — WM_PAINT renders the message instead.
-    int listX = (int)(PM_PAD * g_dpiScale);
-    int listY = (int)((PM_TITLE_H + PM_LIST_PAD_TOP) * g_dpiScale);
-    int listW = physW - 2 * listX;
-    int listH = physH - listY
-              - (int)((PM_PAD + PM_BTN_H + PM_LIST_PAD_BOT) * g_dpiScale);
-
+    // Owner-drawn LISTBOXes — one per section, so each scrolls on its
+    // own and the section headers can stay pinned above them (painted
+    // by WM_PAINT). Skipped in empty-manifest mode, where WM_PAINT
+    // renders the author message instead.
     if (!g_pmConfigEmpty) {
-        g_pmList = CreateWindowExW(0,   // v1.3: no CLIENTEDGE — stone bg + parent chrome only
-            L"LISTBOX", L"",
-            WS_CHILD | WS_VISIBLE | WS_VSCROLL
-                | LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_HASSTRINGS,
-            listX, listY, listW, listH,
-            g_pmHwnd, (HMENU)(UINT_PTR)100, g_hInst, nullptr);
+        PMListGeom gm = PMComputeListGeom(physW, physH);
 
-        // Populate with placeholder strings so the listbox knows how many
-        // items it has. The owner-draw path reads from g_pmRows by index
-        // — the string content here doesn't actually paint.
-        for (size_t i = 0; i < g_pmRows.size(); ++i) {
-            SendMessageW(g_pmList, LB_ADDSTRING, 0,
+        auto mkList = [&](const RECT& r, int ctlId) -> HWND {
+            // NOTE: do NOT add WS_EX_COMPOSITED here. It was tried to
+            // smooth the per-scroll repaint and stopped the owner-drawn
+            // rows painting entirely — the items are present and
+            // selectable, the list just renders empty. Its double
+            // buffering doesn't cooperate with LBS_OWNERDRAWFIXED
+            // rows drawing straight to di->hDC.
+            HWND lb = CreateWindowExW(0,   // v1.3: no CLIENTEDGE — stone bg + parent chrome only
+                L"LISTBOX", L"",
+                // No WS_VSCROLL: PMPaintScrollbar draws a themed
+                // gutter beside the list instead.
+                WS_CHILD | WS_VISIBLE
+                    | LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_HASSTRINGS,
+                r.left, r.top, r.right - r.left, r.bottom - r.top,
+                g_pmHwnd, (HMENU)(UINT_PTR)ctlId, g_hInst, nullptr);
+            if (lb) {
+                SendMessage(lb, LB_SETITEMHEIGHT, 0,
+                            (LPARAM)(int)(PM_ROW_H * g_dpiScale));
+                SetWindowSubclass(lb, PMListSubclass, 1, 0);
+            }
+            return lb;
+        };
+
+        // Handles must exist before the rows are added: PMDrawItem asks
+        // PMBaseFor(di->hwndItem) which compares against g_pmListGlobal,
+        // and LB_ADDSTRING can trigger a draw.
+        if (gm.hasMod)    g_pmListMod    = mkList(gm.modList,  PM_IDC_LIST_MOD);
+        if (gm.hasGlobal) g_pmListGlobal = mkList(gm.globList, PM_IDC_LIST_GLOBAL);
+
+        // Populate with placeholder strings so each listbox knows how
+        // many items it has. The owner-draw path reads from g_pmRows by
+        // base + index — the string content here doesn't actually paint.
+        for (int i = 0; i < g_pmSplit && g_pmListMod; ++i) {
+            SendMessageW(g_pmListMod, LB_ADDSTRING, 0,
                          (LPARAM)g_pmRows[i].text.c_str());
         }
-        // Tell the listbox each item is PM_ROW_H tall.
-        SendMessage(g_pmList, LB_SETITEMHEIGHT, 0,
-                    (LPARAM)(int)(PM_ROW_H * g_dpiScale));
-
-        // Subclass for click-to-toggle + space-to-toggle.
-        SetWindowSubclass(g_pmList, PMListSubclass, 1, 0);
+        for (int i = g_pmSplit; i < (int)g_pmRows.size() && g_pmListGlobal; ++i) {
+            SendMessageW(g_pmListGlobal, LB_ADDSTRING, 0,
+                         (LPARAM)g_pmRows[i].text.c_str());
+        }
     }
 
     // Themed owner-draw buttons at the bottom. Layout depends on mode:
@@ -1168,9 +1735,7 @@ void ShowPluginManager(HWND parent,
     int physGap  = (int)(PM_BTN_GAP * g_dpiScale);
 
     if (g_pmConfigMode) {
-        // Manifest mode: Close + READMEs, side by side, centered. (READMEs
-        // must share the bottom row — placing it above would put it behind
-        // the listbox, which fills the space up to this row.)
+        // Manifest mode: Close + READMEs, two across, centered.
         int rowW = physBtnW * 2 + physGap;
         int rowX = (physW - rowW) / 2;
         g_pmCancelBtn = MkStdBtn(g_pmHwnd, L"Close", 2,
@@ -1196,6 +1761,17 @@ void ShowPluginManager(HWND parent,
         g_pmReadmesBtn = MkStdBtn(g_pmHwnd, L"READMEs", 50,
             readmesX, btnRowY, physBtnW, physBtnH,
             true, ButtonKind::Plugins);
+    }
+
+    // Repository button — top-right corner, aligned with the title row
+    // (per the layout mockup). Standalone, above the list.
+    {
+        int repoW = (int)(PM_BTN_W * g_dpiScale);
+        int repoH = (int)(PM_BTN_H * g_dpiScale);
+        int repoX = physW - (int)(PM_PAD * g_dpiScale) - repoW;
+        int repoY = (int)((PM_PAD - 4) * g_dpiScale);
+        MkStdBtn(g_pmHwnd, L"Repository", 51,
+            repoX, repoY, repoW, repoH, true, ButtonKind::Plugins);
     }
 
     // Modal: disable the parent until our internal pump exits.

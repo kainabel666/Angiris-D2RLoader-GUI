@@ -346,11 +346,14 @@ bool AnyProcessExistsByName(const wchar_t* const* names, size_t count) {
     return found;
 }
 
-// The two process names we treat as "the game is alive". D2RLoader is
-// the bootstrap shim that may exit shortly after spawning D2R.exe — but
-// some setups keep it alive throughout play, and some leave it active
-// briefly between the loader doing its work and D2R.exe being visible.
-// Counting either name as "running" handles all of those.
+// Process names that mean "a game session is alive".
+//
+// IMPORTANT: D2RLoader.exe is NOT a shim that spawns D2R.exe and exits —
+// on this setup D2R.exe never appears in the process table at all, and
+// D2RLoader.exe IS the running game for the whole session. So both names
+// have to count as "alive", and exit detection must wait for BOTH to be
+// gone. Keying on D2R.exe alone means the session is never detected as
+// started and no playtime is ever recorded.
 const wchar_t* const k_d2rProcessNames[] = {
     L"D2R.exe",
     L"D2RLoader.exe",
@@ -606,8 +609,31 @@ static wstring ResolveModLink(const wstring& field, const wstring& modDir) {
 // (LoaderOpts struct moved to ui_state.h)
 LoaderOpts g_loaderOpts;
 
+// D2RLoader's config lives at
+//     <D2R>\d2rloader\config\D2RLoader.toml
+// which matches the same base convention plugin_install uses
+// (global = <d2r>\d2rloader, mod = <d2r>\mods\<mod>\d2rloader, with
+// config/ plugins/ patches/ underneath).
+//
+// It was previously at the D2R root. That's a real trap on upgraded
+// installs: the old root file is left behind, so reads still return
+// plausible-looking values while every write lands somewhere D2RLoader
+// never reads. Symptom is settings that appear to save, revert on
+// nothing in particular, and never take effect in game.
+//
+// So: use the real location if it's there, fall back to the legacy root
+// only if that's the only one present, and otherwise return the current
+// location so a fresh write creates it in the right place.
+static bool PathExists(const wstring& p) {
+    return GetFileAttributesW(p.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 wstring LoaderTomlPath() {
-    return g_cfg.d2rPath + L"\\D2RLoader.toml";
+    wstring current = g_cfg.d2rPath + L"\\d2rloader\\config\\D2RLoader.toml";
+    if (PathExists(current)) return current;
+    wstring legacy = g_cfg.d2rPath + L"\\D2RLoader.toml";
+    if (PathExists(legacy)) return legacy;
+    return current;
 }
 
 // Read a TOML boolean. TOML bools are bare tokens (`true` / `false`,
@@ -627,9 +653,26 @@ static bool TomlGetBool(const wstring& path, const wstring& section,
     return false;
 }
 
+// Read a TOML string, stripping the surrounding quotes. IniGetStr hands
+// back the raw right-hand side, which for a toml string includes its
+// delimiters (`"3.2"`), so strip a single matching pair. A bare
+// (unquoted) value is returned as-is rather than rejected — hand-edited
+// files in the wild aren't always strict.
+static wstring TomlGetStr(const wstring& path, const wstring& section,
+                          const wstring& key, const wstring& def) {
+    wstring v = IniGetStr(path, section, key, L"");
+    if (v.size() >= 2 &&
+        ((v.front() == L'"'  && v.back() == L'"') ||
+         (v.front() == L'\'' && v.back() == L'\''))) {
+        return v.substr(1, v.size() - 2);
+    }
+    return v.empty() ? def : v;
+}
+
 // Save helpers. Toml bools are bare tokens (no quotes); ints likewise
-// bare. Strings would need surrounding quotes — we don't currently write
-// any user-editable strings.
+// bare. Strings MUST be quoted, and the quotes are part of the value we
+// hand IniSetStr — that's the same convention
+// EnforceLoaderTomlOwnership() uses when it writes skip_title_screen.
 // Non-static so the Loader Options modals can call them directly.
 void SaveTomlBool(const wchar_t* section, const wchar_t* key, bool v) {
     IniSetStr(LoaderTomlPath(), section, key, v ? L"true" : L"false");
@@ -637,19 +680,45 @@ void SaveTomlBool(const wchar_t* section, const wchar_t* key, bool v) {
 void SaveTomlInt(const wchar_t* section, const wchar_t* key, int v) {
     IniSetInt(LoaderTomlPath(), section, key, v);
 }
+void SaveTomlStr(const wchar_t* section, const wchar_t* key,
+                 const wchar_t* v) {
+    // Escape any embedded quote/backslash so a stray character can't
+    // break out and corrupt the line. Locale codes and "3.1"/"3.2"
+    // never need this, but the helper is general.
+    wstring out = L"\"";
+    for (const wchar_t* p = v; p && *p; ++p) {
+        if (*p == L'"' || *p == L'\\') out += L'\\';
+        out += *p;
+    }
+    out += L'"';
+    IniSetStr(LoaderTomlPath(), section, key, out.c_str());
+}
 
 static void LoadLoaderOpts() {
     wstring p = LoaderTomlPath();
+
+    // [d2rcore.game_rules] (1.1.0)
+    g_loaderOpts.auraEnchantedSelection =
+        TomlGetStr(p,  L"d2rcore.game_rules", L"aura_enchanted_selection",  L"3.2");
+    g_loaderOpts.bindDemonCurseSelection =
+        TomlGetStr(p,  L"d2rcore.game_rules", L"bind_demon_curse_selection", L"3.2");
 
     // [d2rcore.items]
     g_loaderOpts.showGroundSockets =
         TomlGetBool(p, L"d2rcore.items",   L"show_ground_sockets",  false);
     g_loaderOpts.displayItemLevels =
         TomlGetBool(p, L"d2rcore.items",   L"display_item_levels",  false);
+    g_loaderOpts.itemStatRanges =
+        TomlGetBool(p, L"d2rcore.items",   L"item_stat_ranges",     false);
+    g_loaderOpts.maximumSockets =
+        TomlGetBool(p, L"d2rcore.items",   L"maximum_sockets",      false);
 
     // [d2rcore.player]
     g_loaderOpts.enableRespec =
         TomlGetBool(p, L"d2rcore.player",  L"enable_respec",        false);
+    g_loaderOpts.alwaysEnableRotwLegacyKeybind =
+        TomlGetBool(p, L"d2rcore.player",
+                    L"always_enable_rotw_legacy_graphics_keybind",  false);
 
     // [d2rcore.stash]
     g_loaderOpts.addSharedTabs =
@@ -660,6 +729,30 @@ static void LoadLoaderOpts() {
     // [d2rloader]
     g_loaderOpts.showTcpipButton =
         TomlGetBool(p, L"d2rloader",       L"show_tcpip_button",    false);
+    g_loaderOpts.checkForUpdates =
+        TomlGetBool(p, L"d2rloader",       L"check_for_updates",    true);
+    g_loaderOpts.alwaysGenerateNewMaps =
+        TomlGetBool(p, L"d2rloader",       L"always_generate_new_maps", false);
+    g_loaderOpts.textLocale =
+        TomlGetStr(p,  L"d2rloader",       L"text_locale",          L"");
+    g_loaderOpts.audioLocale =
+        TomlGetStr(p,  L"d2rloader",       L"audio_locale",         L"");
+
+    // [d2rloader.backups] (1.1.0)
+    g_loaderOpts.backupsEnabled =
+        TomlGetBool(p, L"d2rloader.backups", L"enabled",            true);
+    g_loaderOpts.retainedSessions =
+        IniGetInt(p,   L"d2rloader.backups", L"retained_sessions",  10);
+    g_loaderOpts.backupSharedStashes =
+        TomlGetBool(p, L"d2rloader.backups", L"shared_stashes",     true);
+
+    // [d2rloader.advanced] (1.1.0)
+    g_loaderOpts.allowGlobalExtensions =
+        TomlGetBool(p, L"d2rloader.advanced", L"allow_global_extensions", true);
+    g_loaderOpts.allowModExtensions =
+        TomlGetBool(p, L"d2rloader.advanced", L"allow_mod_extensions",    true);
+    g_loaderOpts.writeCrashDumps =
+        TomlGetBool(p, L"d2rloader.advanced", L"write_crash_dumps",       false);
 
     // [d2rloader.developer]
     g_loaderOpts.enableConsole =
@@ -670,12 +763,16 @@ static void LoadLoaderOpts() {
     // [d2rloader.developer.logs]
     g_loaderOpts.logsEnabled =
         TomlGetBool(p, L"d2rloader.developer.logs", L"enabled",        false);
+    g_loaderOpts.logNativeBlizzard =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"native_blizzard", false);
     g_loaderOpts.logJsonResources =
         TomlGetBool(p, L"d2rloader.developer.logs", L"json_resources", false);
     g_loaderOpts.logWidgetPanels =
         TomlGetBool(p, L"d2rloader.developer.logs", L"widget_panels",  false);
     g_loaderOpts.logExcelFiles =
         TomlGetBool(p, L"d2rloader.developer.logs", L"excel_files",    false);
+    g_loaderOpts.logBinValidation =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"bin_validation", false);
     g_loaderOpts.logFonts =
         TomlGetBool(p, L"d2rloader.developer.logs", L"fonts",          false);
     g_loaderOpts.logSprites =
@@ -684,24 +781,51 @@ static void LoadLoaderOpts() {
         TomlGetBool(p, L"d2rloader.developer.logs", L"chat_messages",  false);
     g_loaderOpts.logModels =
         TomlGetBool(p, L"d2rloader.developer.logs", L"models",         false);
+    g_loaderOpts.logExtensionDetails =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"extension_details", false);
+    g_loaderOpts.logCharacterEnv =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"character_environment", false);
+    g_loaderOpts.logArchiveMounts =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"archive_mounts", false);
+    g_loaderOpts.logCascFetchDecisions =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"casc_fetch_decisions", false);
+    g_loaderOpts.logCascFiles =
+        TomlGetBool(p, L"d2rloader.developer.logs", L"casc_files",     false);
 
     // Clamp integer ranges to sane values in case the file was
     // hand-edited to something the launcher UI can't produce.
+    //
+    // add_shared_tabs: the old ceiling here was 16, matching the Basic
+    // modal's dropdown. D2RLoader 1.1.0 ships 100 as its stock default,
+    // so a 16 clamp would silently rewrite every default install's value
+    // down by 84 the first time a user touched any Basic setting.
+    // Ceiling raised to 100; the UI control has to change from a
+    // dropdown to a text box to match (see the row table).
     if (g_loaderOpts.addSharedTabs     < 0)   g_loaderOpts.addSharedTabs     = 0;
-    if (g_loaderOpts.addSharedTabs     > 16)  g_loaderOpts.addSharedTabs     = 16;
+    if (g_loaderOpts.addSharedTabs     > 100) g_loaderOpts.addSharedTabs     = 100;
     if (g_loaderOpts.setMaterialsLimit < 0)   g_loaderOpts.setMaterialsLimit = 0;
     if (g_loaderOpts.setMaterialsLimit > 255) g_loaderOpts.setMaterialsLimit = 255;
+    // retained_sessions: toml documents 1-100 explicitly.
+    if (g_loaderOpts.retainedSessions  < 1)   g_loaderOpts.retainedSessions  = 1;
+    if (g_loaderOpts.retainedSessions  > 100) g_loaderOpts.retainedSessions  = 100;
 }
 
-// D2RLoader has two settings that would bypass the launcher's mod picker:
-//   [d2rloader] default_mod       — auto-launches a specific mod on start
-//   [d2rloader] skip_title_screen — bypasses the title screen entry point
-// The launcher is meant to be the entry point for mod selection, so both
-// get forced to neutral values every time the launcher runs. Users can
-// still hand-edit them between launcher sessions; the launcher will just
-// reset them again next start.
+// skip_title_screen bypasses the title screen entry point, which the
+// launcher owns outright, so it's forced off every time Angiris runs.
+//
+// default_mod used to be cleared here too. That was correct while the
+// launcher passed -mod on the command line: a stale default_mod would
+// have been a second, competing source of mod selection. As of v1.6.2
+// it IS the mod selection — the Play handler writes it immediately
+// before launching — so blanking it on startup would erase the very
+// value the launcher just relied on, and leave the toml disagreeing
+// with the mod picker for the whole session until the next Play.
+//
+// The side effect is that default_mod now persists between sessions:
+// running D2RLoader.exe directly will start whatever mod Angiris last
+// launched. That's this setting's documented purpose, so it's left
+// alone rather than fought.
 static void EnforceLoaderTomlOwnership() {
-    IniSetStr(LoaderTomlPath(), L"d2rloader", L"default_mod",       L"\"\"");
     IniSetStr(LoaderTomlPath(), L"d2rloader", L"skip_title_screen", L"false");
 }
 
@@ -2528,7 +2652,61 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
             // before D2R.exe starts. Mod-aware launches should always go
             // through the loader, not the bare game executable.
             wstring exe  = g_cfg.d2rPath + L"\\D2RLoader.exe";
-            wstring cmd  = L"\"" + exe + L"\" " + BuildLaunchArgs();
+
+            // v1.6.2: launch config goes into D2RLoader.toml rather than
+            // argv — default_mod picks the mod, launch_arguments carries
+            // the rest. One source of truth, so the toml, the preview
+            // string and what the game receives can't drift apart.
+            //
+            // launch_arguments is MERGED, not replaced: any flag the
+            // user added that we don't own is preserved (see
+            // StripOwnedLaunchArgs).
+            //
+            // The write is then VERIFIED by reading it back. A toml
+            // write can fail in ways a command line never can — the file
+            // locked, read-only, or a Program Files install without
+            // write permission. If it didn't take, fall back to passing
+            // argv so the launch still works: otherwise default_mod
+            // would be empty and D2RLoader would start vanilla, looking
+            // for all the world like the mod itself had broken.
+            wstring modFolder;
+            if (g_selMod >= 0 && g_selMod < (int)g_mods.size())
+                modFolder = g_mods[g_selMod].folder;
+
+            wstring tomlPath = LoaderTomlPath();
+            wstring mergedArgs = BuildTomlLaunchArguments(
+                TomlGetStr(tomlPath, L"d2rloader", L"launch_arguments", L""));
+
+            // default_mod must never go out blank. It IS the mod
+            // selection now, so an empty value doesn't mean "no
+            // preference" — it means D2RLoader starts vanilla while the
+            // launcher's UI claims a mod is selected.
+            //
+            // The file must ALREADY EXIST. IniSetStr will happily create
+            // a stub containing only the keys we wrote, and that stub
+            // then reads back exactly what we put in it — so the verify
+            // below would pass while D2RLoader read a completely
+            // different file. That's precisely how a wrong
+            // LoaderTomlPath went undetected. If the toml isn't where we
+            // expect, don't invent one: fall back to argv.
+            bool tomlOk = !modFolder.empty() && PathExists(tomlPath);
+            if (tomlOk) {
+                SaveTomlStr(L"d2rloader", L"default_mod",      modFolder.c_str());
+                SaveTomlStr(L"d2rloader", L"launch_arguments", mergedArgs.c_str());
+
+                tomlOk =
+                    (TomlGetStr(tomlPath, L"d2rloader", L"default_mod", L"")
+                        == modFolder)
+                 && (TomlGetStr(tomlPath, L"d2rloader", L"launch_arguments", L"")
+                        == mergedArgs);
+            }
+
+            wstring cmd = L"\"" + exe + L"\"";
+            if (!tomlOk) {
+                // Fallback path — argv still works, so the launch is
+                // correct even though the toml didn't take.
+                cmd += L" " + BuildLaunchArgs();
+            }
 
             // If we already have a previous launch tracked, stop polling
             // it before starting a new one — only one tracked launch at
@@ -3822,15 +4000,14 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
 
-            bool d2rRunning = AnyProcessExistsByName(k_d2rProcessNames,
-                                                    k_d2rProcessNameCount);
+            // Either name counts as a live session — see the comment on
+            // k_d2rProcessNames. D2RLoader.exe is the game here, not a
+            // launcher shim, so it must not be excluded.
+            bool gameRunning = AnyProcessExistsByName(k_d2rProcessNames,
+                                                      k_d2rProcessNameCount);
 
-            if (d2rRunning) {
-                // At least one of D2R.exe / D2RLoader.exe is alive.
-                // First time we see it, anchor the game-start tick —
-                // that's when "actual gameplay" begins for the purpose
-                // of playtime tracking (excludes the launcher-overhead
-                // window between click and process spawn).
+            if (gameRunning) {
+                // First sighting anchors the game-start tick.
                 if (!g_d2rEverSeen) {
                     g_d2rGameStartTick = GetTickCount();
                 }
@@ -3838,10 +4015,10 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
 
-            // Neither D2R.exe nor D2RLoader.exe currently present.
+            // Nothing running.
             if (g_d2rEverSeen) {
-                // We saw the game earlier — now both are gone. True
-                // exit: credit the elapsed time to the launched mod's
+                // We saw a session earlier — now it's gone. True exit:
+                // credit the elapsed time to the launched mod's
                 // playtime accumulator, then restore the launcher.
                 if (g_d2rGameStartTick != 0 && !g_d2rGameModFolder.empty()) {
                     DWORD now = GetTickCount();
@@ -3860,22 +4037,41 @@ static LRESULT CALLBACK MainProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp) {
                 SetForegroundWindow(hw);
                 SetActiveWindow(hw);
                 BringWindowToTop(hw);
+                // Force the full redraw here rather than relying on
+                // WM_SIZE's s_wasMinimized bookkeeping. That path only
+                // fires if SW_RESTORE actually produced a
+                // SIZE_RESTORED, which isn't guaranteed — if the user
+                // restored the window by hand while the game was still
+                // up, IsIconic is already false and no WM_SIZE arrives
+                // at all, leaving whatever was on screen stale.
+                RedrawWindow(hw, nullptr, nullptr,
+                             RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW
+                             | RDW_ALLCHILDREN);
                 return 0;
             }
 
-            // Never seen the game yet — D2R might still be spawning.
-            // Fail-safe: if neither process has shown up within 60 s of
-            // click, assume the loader crashed or the launch failed,
-            // and restore the launcher so the user isn't stranded with
-            // a minimized window that never comes back.
+            // Nothing has appeared yet. The original 60 s fail-safe was
+            // almost certainly the bug: a mod whose first launch takes
+            // longer than a minute (txt→bin compile, CASC validation)
+            // would trip it, which kills the poll timer and restores the
+            // launcher mid-startup — after which the whole session goes
+            // untracked. It fails silently and looks identical to a
+            // normal exit, so it's easy to miss.
+            //
+            // 5 minutes is generous enough for a heavy first launch
+            // while still rescuing the user if the launch genuinely
+            // failed. This is the dial to turn if it ever recurs.
             DWORD waited = GetTickCount() - g_d2rLaunchTick;
-            if (waited > 60000) {
+            if (waited > 300000) {
                 g_d2rTracking = false;
                 KillTimer(hw, IDT_D2R_POLL);
                 if (IsIconic(hw)) ShowWindow(hw, SW_RESTORE);
                 SetForegroundWindow(hw);
                 SetActiveWindow(hw);
                 BringWindowToTop(hw);
+                RedrawWindow(hw, nullptr, nullptr,
+                             RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW
+                             | RDW_ALLCHILDREN);
             }
             // else: keep polling, the game should appear soon.
         }

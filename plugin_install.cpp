@@ -379,6 +379,117 @@ bool IsBackupWorthy(const PluginFileOp& op) {
 // Does the extracted tree contain a file matching `leaf` (basename)?
 // Returns the absolute path within `root`, searching root then one level
 // deep — the same shallow layout FindPluginInfo handles.
+// Directory counterpart of FindExtractedFile: resolve a zip-relative
+// path that names a FOLDER, checking the root and one level deep (zips
+// commonly nest everything inside a single top folder).
+// ZI_DirExists comes from fs_utils.h.
+wstring FindExtractedDir(const wstring& root, const wstring& relPath) {
+    wstring direct = root + L"\\" + relPath;
+    if (ZI_DirExists(direct)) return direct;
+    WIN32_FIND_DATAW fd;
+    wstring pat = root + L"\\*";
+    HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return L"";
+    wstring found;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+            continue;
+        wstring cand = root + L"\\" + fd.cFileName + L"\\" + relPath;
+        if (ZI_DirExists(cand)) { found = cand; break; }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
+}
+
+// Cap on files pulled in by a single folder entry. A manifest is
+// author-supplied and (with the repository feature) may be downloaded,
+// so an accidentally-broad folder entry shouldn't be able to enqueue an
+// unbounded number of writes. Generous enough for any real plugin tree.
+constexpr size_t kMaxFolderFiles = 2000;
+
+// Collect every file under dirAbs, returning paths RELATIVE to dirAbs
+// with backslash separators. Recurses; stops once the cap is hit.
+void EnumerateFilesRecursive(const wstring& dirAbs, const wstring& relPrefix,
+                             vector<wstring>& out) {
+    if (out.size() >= kMaxFolderFiles) return;
+    WIN32_FIND_DATAW fd;
+    wstring pat = dirAbs + L"\\*";
+    HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+            continue;
+        wstring rel = relPrefix.empty()
+                        ? wstring(fd.cFileName)
+                        : relPrefix + L"\\" + fd.cFileName;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            EnumerateFilesRecursive(dirAbs + L"\\" + fd.cFileName, rel, out);
+        } else {
+            if (out.size() >= kMaxFolderFiles) break;
+            out.push_back(rel);
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+// ── Folder entries ───────────────────────────────────────────────────
+// Plugins have grown past "a DLL and a config" — some now ship whole
+// trees (script folders, asset packs). A manifest entry whose `path`
+// names a FOLDER is expanded here into one entry per contained file,
+// BEFORE the resolver runs. Doing it as a pre-pass means the sandbox,
+// the {mod}/{mpq} substitution, the scope-relative rules, the collision
+// handling and the uninstall record all keep working unchanged — they
+// only ever see individual files.
+//
+// Structure is preserved for destPath entries: the file's path relative
+// to the source folder is appended to destPath, so
+//     { "path": "Lua", "destPath": "{mod}/d2rloader/Lua" }
+// puts Lua/core/util.lua at <mod>/d2rloader/Lua/core/util.lua.
+//
+// Entries routed by the `dest` ENUM instead are FLATTENED into that
+// folder (Plugins/Patches are flat by design, and the resolver keys its
+// enable/disable handling on the leaf name). Use destPath when the tree
+// shape matters.
+//
+// A trailing slash on `path` is accepted and ignored, so both "Lua" and
+// "Lua/" work.
+void ExpandFolderEntries(const wstring& manifestRoot,
+                         vector<RawFileEntry>& entries) {
+    vector<RawFileEntry> expanded;
+    expanded.reserve(entries.size());
+
+    for (const RawFileEntry& e : entries) {
+        // Trim trailing separators before testing — "Lua/" must resolve
+        // the same as "Lua".
+        wstring probe = e.path;
+        while (!probe.empty() &&
+               (probe.back() == L'/' || probe.back() == L'\\')) {
+            probe.pop_back();
+        }
+        if (probe.empty()) { expanded.push_back(e); continue; }
+
+        wstring dirAbs = FindExtractedDir(manifestRoot, probe);
+        if (dirAbs.empty()) { expanded.push_back(e); continue; }  // a file, or absent
+
+        vector<wstring> rels;
+        EnumerateFilesRecursive(dirAbs, L"", rels);
+        for (const wstring& rel : rels) {
+            RawFileEntry fe;
+            fe.path = probe + L"\\" + rel;   // stays zip-relative
+            fe.dest = e.dest;
+            if (!e.destPath.empty()) {
+                wstring dp = e.destPath;
+                while (!dp.empty() && (dp.back() == L'/' || dp.back() == L'\\'))
+                    dp.pop_back();
+                fe.destPath = dp + L"\\" + rel;   // preserve tree shape
+            }
+            expanded.push_back(fe);
+        }
+    }
+    entries.swap(expanded);
+}
+
 wstring FindExtractedFile(const wstring& root, const wstring& relPath) {
     // relPath may include subfolders (manifest paths are zip-relative).
     wstring direct = root + L"\\" + relPath;
@@ -467,6 +578,17 @@ PluginInstallPlan InspectPluginZip(const wstring& zipPath,
     if (raw.empty()) {
         DeleteFolderRecursive(tmp);
         plan.error = L"plugin_info.json lists no files.";
+        return plan;
+    }
+
+    // Expand any entry whose `path` names a folder into one entry per
+    // contained file. Done BEFORE the empty check below and before the
+    // DLL scan, so a plugin whose DLL lives inside a shipped folder is
+    // still identified correctly.
+    ExpandFolderEntries(manifestRoot, raw);
+    if (raw.empty()) {
+        DeleteFolderRecursive(tmp);
+        plan.error = L"plugin_info.json lists no installable files.";
         return plan;
     }
 
@@ -881,6 +1003,32 @@ ZipKind PeekZipKind(const wstring& zipPath) {
 
     DeleteFolderRecursive(tmp);
     return kind;
+}
+
+// Peek a plugin/patch zip's declared manifest "name" without installing.
+// Extracts to a temp dir, reads plugin_info.json / patch_info.json, returns
+// the "name" field (empty if no manifest or no name). Used by the repository
+// installer to verify the downloaded file matches the catalog entry before
+// committing to an install.
+wstring PeekManifestName(const wstring& zipPath) {
+    size_t dot = zipPath.find_last_of(L'.');
+    if (dot == wstring::npos ||
+        _wcsicmp(zipPath.substr(dot).c_str(), L".zip") != 0)
+        return L"";
+    wstring tmp = MakeTempInstallDir();
+    if (tmp.empty()) return L"";
+    if (!RunTarExtract(zipPath, tmp)) {
+        DeleteFolderRecursive(tmp);
+        return L"";
+    }
+    wstring name;
+    wstring infoPath = FindPluginInfo(tmp);   // handles plugin_info OR patch_info
+    if (!infoPath.empty()) {
+        wstring json = ReadTextFile(infoPath);
+        name = JsonStr(json, L"name");
+    }
+    DeleteFolderRecursive(tmp);
+    return name;
 }
 
 bool HandlePluginDropZip(const wstring& zipPath,

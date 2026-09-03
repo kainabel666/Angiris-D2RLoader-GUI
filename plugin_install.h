@@ -177,6 +177,11 @@ enum class ZipKind {
 //  cleanly separate.)
 ZipKind PeekZipKind(const wstring& zipPath);
 
+// Peek a zip's declared manifest "name" (plugin_info.json / patch_info.json)
+// without installing. Empty if no manifest, no name, or not a zip. Used to
+// verify a downloaded repository file matches its catalog entry.
+wstring PeekManifestName(const wstring& zipPath);
+
 // Optional allowlist: when a manifest-mode mod restricts which plugins may
 // be installed, the caller passes the mod's sanctioned DLL/name list here.
 // A dropped plugin must match one entry (by DLL filename OR name) or it's

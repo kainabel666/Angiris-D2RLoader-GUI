@@ -1,6 +1,75 @@
 ANGIRIS LAUNCHER — CHANGELOG
 ══════════════════════════════════════════════════════════════════════
 
+## v1.7
+
+Support for **D2RLoader 1.1.0**, a downloadable **plugin repository**, and a
+rebuilt Plugin Manager.
+
+### Plugin Repository (new)
+
+- **Browse and install community plugins from inside the launcher.** A new
+  Repository button in the Plugin Manager opens a catalog of plugins and
+  patches — pick one, choose where it goes, and install without leaving the
+  app. Downloads route through the same install path as drag-and-drop, so
+  everything that applies there applies here.
+- **Install to Global or a specific mod**, with the target mod always visible
+  so you can see where something is about to land. If a global install would
+  drop mod-local files, the launcher asks first.
+- **Downloads are verified** before anything is installed: the file must
+  really be an archive (not an error page), and its manifest name must match
+  the catalog entry. A mismatch now shows both names so it's obvious which
+  side is wrong.
+
+### D2RLoader 1.1.0 settings
+
+- **Loader Options now covers all of 1.1.0's settings**, up from 16 to 37 —
+  Aura Enchanted and Bind Demon rules, item stat ranges, maximum sockets,
+  character backups, text and audio language, the extension gates, and nine
+  new logging categories.
+- **Both options windows scroll**, so the full list is reachable at any UI
+  scale instead of running off the screen.
+- **Warnings when plugins can't load.** If D2RLoader's extension switches are
+  off, the Plugin Manager marks the affected section — previously an install
+  could appear to succeed and then silently do nothing in game.
+- **A notice when the active mod ships its own D2RLoader config**, since its
+  settings can override the ones shown.
+
+### Plugin Manager
+
+- **Mod and Global plugins are now separate lists**, each scrolling on its
+  own, with headings that stay put instead of scrolling away.
+- **Themed scrollbars** throughout, replacing the plain system ones.
+- **Fixed the background breaking up** when scrolling a long plugin list.
+
+### Launch and install
+
+- **Launch settings are written to D2RLoader.toml** rather than passed on the
+  command line, so the launcher, the config file and the game can't disagree.
+  Hand-added arguments in the toml are preserved.
+- **`Use Txts` is no longer locked on** — D2RLoader no longer requires it.
+- **Whole folders can be installed.** A `plugin_info.json` entry can name a
+  folder instead of a single file and the whole tree is installed, keeping its
+  structure. Plugins shipping script or asset folders no longer need an entry
+  per file.
+- **Patches keep their real filename** when installed from the repository
+  (new optional `fileName` field in the catalog).
+
+### Fixes
+
+- **Playtime tracking works again.** Mods that took over a minute to start
+  silently lost their whole session, which also stopped the most-recently
+  played mod moving to the top of the list.
+- **Loader settings are saved to the right file.** They were being written to
+  an old config location and never applied.
+- **The D2RLoader update check works again** after the D2RLoader site moved
+  its download page.
+- Fixed the launcher redrawing incorrectly when returning from a game.
+- Fixed plugin descriptions with long titles overlapping their own text.
+- Fixed flicker when scrolling the Plugin Manager, and blurred text in the
+  options windows.
+
+  
  v1.6.1
 
 A polish release on top of v1.6, refining the drag-drop install experience.

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-//  repository.cpp — plugin/patch repository model + manifest fetch (v1.6.2)
+//  repository.cpp — plugin/patch repository model + manifest fetch (v1.7)
 //  See repository.h for the flow and repository_SCHEMA.md for the format.
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -9,7 +9,9 @@
 #include "fs_utils.h"       // MakeTempInstallDir, DeleteFolderRecursive
 #include "plugin_install.h" // PeekManifestName, PeekZipKind, ZipKind
 #include "plugin_drop_ui.h" // HandleRepoInstall
+#include "d2rloader_update.h" // ComputeFileSha256 (hub release verification)
 
+#include <vector>
 #include <string>
 #include <shlwapi.h>
 #include <windows.h>
@@ -24,8 +26,19 @@ using std::vector;
 //
 // The file must be shared as "Anyone with the link" or the fetch gets an
 // HTML sign-in page instead of the manifest.
+// The catalog source. As of v1.7 this is the D2RLoader Extension Hub
+// rather than a hand-maintained Drive manifest — the hub is public,
+// unauthenticated, versioned (/api/v1/), and every package is scanned
+// and hashed before publication.
+//
+// type=both matches the hub's own Plugin/Patch filter; sort=newest
+// matches its default ordering.
 const wchar_t* REPO_MANIFEST_URL =
-    L"https://drive.google.com/uc?export=download&id=1Iip09_rMNsrYUDHK9vnFExIPTd75xwxd";
+    L"https://d2rloader.net/api/v1/hub/plugins?type=both&sort=newest";
+
+// Previous source, kept for reference. FetchRepoManifest still parses
+// this format if REPO_MANIFEST_URL is pointed back at it:
+//   https://drive.google.com/uc?export=download&id=1Iip09_rMNsrYUDHK9vnFExIPTd75xwxd
 
 // Set by InstallRepoEntry when a name check fails, so the error can say
 // what the zip actually declared instead of leaving the user to guess.
@@ -45,6 +58,14 @@ wstring RepoInstallResultText(RepoInstallResult r, const RepoEntry& e) {
             return L"The download for \"" + e.name + L"\" didn't return a "
                    L"usable file. The link may be wrong or the file was "
                    L"removed.";
+        case RepoInstallResult::HashMismatch:
+            return L"\"" + e.name + L"\" failed its integrity check.\n\n"
+                   L"The download doesn't match the hash the hub published "
+                   L"for this release, so it hasn't been installed.\n\n"
+                   L"Expected: " + e.sha256 + L"\n"
+                   L"Got:      " + g_repoDeclaredName + L"\n\n"
+                   L"This usually means an interrupted download. Try again; "
+                   L"if it keeps failing, report it to the plugin author.";
         case RepoInstallResult::NameMismatch:
             return L"The downloaded file doesn't match \"" + e.name + L"\".\n\n"
                    L"Catalog name:  \"" + e.name + L"\"\n"
@@ -63,17 +84,32 @@ wstring RepoInstallResultText(RepoInstallResult r, const RepoEntry& e) {
 
 namespace {
 
-// Find this object's real closing brace, skipping any '}' inside a string
-// value (same guard the plugin manifest parser uses — a value like
-// "{mod}/{mpq}" would otherwise truncate the object at the first '}').
+// Find this object's real closing brace, skipping any brace inside a
+// string value (a value like "{mod}/{mpq}" would otherwise truncate the
+// object at the first '}').
+//
+// Tracks NESTING DEPTH. It originally returned the first unquoted '}',
+// which was correct only because the old hand-written manifest's entries
+// were flat. Hub items nest loaderVersion{}, tags[{}] and
+// latestRelease{}, so the naive version stopped at the first inner
+// object's brace and silently truncated everything after it — the outer
+// object appeared to have no release data at all.
 size_t FindObjectEnd(const wstring& j, size_t open) {
     bool inStr = false;
+    int depth = 0;
     for (size_t k = open; k < j.size(); ++k) {
         wchar_t c = j[k];
-        if (c == L'"' && (k == 0 || j[k - 1] != L'\\'))
+        if (c == L'"' && (k == 0 || j[k - 1] != L'\\')) {
             inStr = !inStr;
-        else if (c == L'}' && !inStr)
-            return k;
+            continue;
+        }
+        if (inStr) continue;
+        if (c == L'{' || c == L'[') {
+            ++depth;
+        } else if (c == L'}' || c == L']') {
+            --depth;
+            if (depth == 0) return k;
+        }
     }
     return wstring::npos;
 }
@@ -177,6 +213,171 @@ RepoManifest ParseRepoManifest(const wstring& json) {
     return m;
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════
+//  D2RLOADER EXTENSION HUB
+// ═══════════════════════════════════════════════════════════════════════
+//
+// https://d2rloader.net/api/v1/hub/plugins — public, no auth, JSON.
+// Replaces the hand-maintained Drive manifest as the catalog source.
+//
+// Query params observed on the hub's own page: sort=newest|updated|
+// downloads|rating, type=both|plugin|patch. The browser's type toggle
+// maps straight onto that.
+//
+// Downloads go through the hub's own release endpoint rather than a
+// storage URL built from storageKey:
+//     GET /api/v1/hub/releases/<releaseId>/download
+// which 302s to wherever the blob actually lives. That indirection is
+// the hub's to manage — it can move storage without breaking us, which
+// matters given the site has already been restructured once during this
+// project. HttpDownloadFile follows redirects
+// (WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS), so no extra handling here.
+static const wchar_t* HUB_RELEASE_BASE =
+    L"https://d2rloader.net/api/v1/hub/releases/";
+
+wstring HubDownloadUrl(const RepoEntry& e) {
+    if (e.releaseId.empty()) return L"";
+    return wstring(HUB_RELEASE_BASE) + e.releaseId + L"/download";
+}
+
+// Extract a nested JSON object by key: finds "key" then the '{' that
+// follows and returns that whole object, braces included. Empty when the
+// key is absent or null (the hub uses null for several optionals).
+static wstring JsonSubObject(const wstring& json, const wchar_t* key) {
+    wstring needle = wstring(L"\"") + key + L"\"";
+    size_t k = json.find(needle);
+    if (k == wstring::npos) return L"";
+    size_t c = json.find(L':', k + needle.size());
+    if (c == wstring::npos) return L"";
+    size_t b = json.find_first_not_of(L" \t\r\n", c + 1);
+    if (b == wstring::npos || json[b] != L'{') return L"";   // null or scalar
+    size_t e = FindObjectEnd(json, b);
+    if (e == wstring::npos) return L"";
+    return json.substr(b, e - b + 1);
+}
+
+// The hub's tags are objects ({id, name, slug}), not bare strings, so
+// JsonStrArray doesn't apply — walk the array and take each "name".
+static vector<wstring> JsonTagNames(const wstring& obj) {
+    vector<wstring> out;
+    size_t k = obj.find(L"\"tags\"");
+    if (k == wstring::npos) return out;
+    size_t lb = obj.find(L'[', k);
+    if (lb == wstring::npos) return out;
+    size_t p = lb + 1;
+    while (p < obj.size()) {
+        while (p < obj.size() && (obj[p] == L' ' || obj[p] == L'\t' ||
+               obj[p] == L'\r' || obj[p] == L'\n' || obj[p] == L','))
+            ++p;
+        if (p >= obj.size() || obj[p] == L']') break;
+        if (obj[p] != L'{') { ++p; continue; }
+        size_t oe = FindObjectEnd(obj, p);
+        if (oe == wstring::npos) break;
+        wstring t = JsonStr(obj.substr(p, oe - p + 1), L"name");
+        if (!t.empty()) out.push_back(t);
+        p = oe + 1;
+    }
+    return out;
+}
+
+// Trim an ISO-8601 timestamp to just the date. The hub returns
+// "2026-09-05T13:02:50.108Z"; the detail panel only wants the day.
+static wstring IsoDateOnly(const wstring& iso) {
+    size_t t = iso.find(L'T');
+    return (t == wstring::npos) ? iso : iso.substr(0, t);
+}
+
+RepoManifest ParseHubCatalog(const wstring& json, bool newestLoaderOnly) {
+    RepoManifest m;
+    m.repoName = L"Angiris Community Plugins";
+
+    size_t ik = json.find(L"\"items\"");
+    if (ik == wstring::npos) {
+        m.error = L"The hub response has no \"items\" list.";
+        return m;
+    }
+    size_t lb = json.find(L'[', ik);
+    if (lb == wstring::npos) {
+        m.error = L"The hub \"items\" list is malformed.";
+        return m;
+    }
+
+    int maxLoaderId = 0;
+    size_t p = lb + 1;
+    while (p < json.size()) {
+        while (p < json.size() && (json[p] == L' ' || json[p] == L'\t' ||
+               json[p] == L'\r' || json[p] == L'\n' || json[p] == L','))
+            ++p;
+        if (p >= json.size() || json[p] == L']') break;
+        if (json[p] != L'{') { ++p; continue; }
+
+        size_t oe = FindObjectEnd(json, p);
+        if (oe == wstring::npos) break;
+        wstring obj = json.substr(p, oe - p + 1);
+        p = oe + 1;
+
+        RepoEntry e;
+        // Every top-level scalar precedes the nested loaderVersion /
+        // tags / latestRelease objects in the hub's output, so a
+        // first-match JsonStr resolves to the right one. Anything that
+        // ALSO appears nested (version, fileName, name-inside-tags) is
+        // read from an explicitly scoped sub-object instead.
+        e.id          = JsonStr(obj, L"id");
+        e.name        = JsonStr(obj, L"name");
+        e.kind        = JsonStr(obj, L"type");        // "plugin" | "patch"
+        e.slug        = JsonStr(obj, L"slug");
+        e.author      = JsonStr(obj, L"author");
+        e.summary     = JsonStr(obj, L"summary");
+        e.description = JsonStr(obj, L"description");
+        e.updated     = IsoDateOnly(JsonStr(obj, L"publishedAt"));
+        e.downloadCount  = JsonInt(obj, L"downloadCount", 0);
+        e.ratingAverage  = JsonStr(obj, L"ratingAverage");
+        e.ratingCount    = JsonInt(obj, L"ratingCount", 0);
+        e.loaderVersionId = JsonInt(obj, L"loaderVersionId", 0);
+        e.tags        = JsonTagNames(obj);
+
+        wstring lv = JsonSubObject(obj, L"loaderVersion");
+        if (!lv.empty()) e.loaderVersion = JsonStr(lv, L"version");
+
+        wstring rel = JsonSubObject(obj, L"latestRelease");
+        if (!rel.empty()) {
+            e.releaseId  = JsonStr(rel, L"id");
+            e.version    = JsonStr(rel, L"version");
+            e.fileName   = JsonStr(rel, L"fileName");
+            e.storageKey = JsonStr(rel, L"storageKey");
+            e.sha256     = JsonStr(rel, L"sha256");
+            e.sizeBytes  = (long long)JsonInt(rel, L"sizeBytes", 0);
+        }
+        e.url = HubDownloadUrl(e);
+
+        // A release with no id or no hash can't be downloaded or
+        // verified, so it isn't listed at all. storageKey is kept for
+        // reference but isn't required — the download endpoint is built
+        // from releaseId.
+        if (e.id.empty() || e.name.empty() ||
+            e.releaseId.empty() || e.sha256.empty()) continue;
+        if (e.kind.empty()) e.kind = L"plugin";
+
+        if (e.loaderVersionId > maxLoaderId) maxLoaderId = e.loaderVersionId;
+        m.entries.push_back(e);
+    }
+
+    // Keep only entries built for the newest D2RLoader the hub knows
+    // about. Filtering on loaderVersionId (the hub's own ordering key)
+    // rather than the version string means this follows the hub forward
+    // without a code change when 1.3 lands.
+    if (newestLoaderOnly && maxLoaderId > 0) {
+        vector<RepoEntry> keep;
+        for (const RepoEntry& e : m.entries)
+            if (e.loaderVersionId == maxLoaderId) keep.push_back(e);
+        m.entries.swap(keep);
+    }
+
+    m.ok = true;
+    return m;
+}
+
 RepoManifest FetchRepoManifest(const wstring& manifestUrl, int timeoutMs) {
     RepoManifest m;
     if (manifestUrl.empty()) {
@@ -195,17 +396,22 @@ RepoManifest FetchRepoManifest(const wstring& manifestUrl, int timeoutMs) {
         return m;
     }
 
-    // Guard against getting an HTML page instead of JSON — the classic
-    // Google-Drive-returned-a-page failure. A JSON manifest starts with '{'
-    // (after optional whitespace/BOM).
+    // Guard against getting an HTML page instead of JSON.
     wstring b = r.body;
     size_t s = b.find_first_not_of(L" \t\r\n\xFEFF");
     if (s == wstring::npos || b[s] != L'{') {
-        m.error = L"The repository link didn't return catalog data. If it's a "
-                  L"Google Drive link, make sure it's the direct-download form.";
+        m.error = L"The repository link didn't return catalog data.";
         return m;
     }
 
+    // Two catalog formats. The Extension Hub wraps its rows in "items"
+    // and has no "schema" field; the older hand-written manifest uses
+    // "entries" with a schema number. Detect rather than assume, so a
+    // stale URL produces a sensible error instead of an empty list.
+    if (b.find(L"\"items\"") != wstring::npos &&
+        b.find(L"\"schema\"") == wstring::npos) {
+        return ParseHubCatalog(r.body, /*newestLoaderOnly=*/true);
+    }
     return ParseRepoManifest(r.body);
 }
 
@@ -313,6 +519,24 @@ RepoInstallResult InstallRepoEntry(HWND parent, const RepoEntry& e,
     // 3. Name verification for plugin zips — the file's manifest name must
     //    match the catalog entry (guards a wrong/swapped file behind the
     //    URL). Bare patches (.json) have no manifest name to check.
+    // 3a. Hash check. The Extension Hub publishes a sha256 for every
+    // release, so we can verify the exact bytes we received rather than
+    // inferring intent from a name string. This is strictly stronger
+    // than the manifest-name check below and catches truncated
+    // downloads, CDN errors and substituted files alike.
+    //
+    // Only applies when the catalog supplied a hash — the older
+    // hand-written manifest format has none, and those entries fall
+    // through to the name check as before.
+    if (!e.sha256.empty()) {
+        wstring actual = ComputeFileSha256(dest);
+        if (actual.empty() || _wcsicmp(actual.c_str(), e.sha256.c_str()) != 0) {
+            g_repoDeclaredName = actual.empty() ? L"(hash unavailable)" : actual;
+            DeleteFileW(dest.c_str());
+            return RepoInstallResult::HashMismatch;
+        }
+    }
+
     if (!isPatch) {
         wstring declared = PeekManifestName(dest);
         // Trim both sides before comparing. _wcsicmp folds case but

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════
-//  repo_browser.cpp — repository browser modal (v1.6.2)
+//  repo_browser.cpp — repository browser modal (v1.7)
 //  See repo_browser.h for the flow.
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -46,6 +46,18 @@ constexpr int RB_MENU_GUTTER= 26;    // left gutter in menu rows (check dot)
 
 // Controls.
 constexpr int RB_IDC_LIST    = 100;
+
+// ── Themed scrollbars ────────────────────────────────────────────────
+// Same asset family and native-pixel rule as mod_list / plugin_manager:
+// the art is blitted at native size, so scaling the gutter would push
+// the arrow caps out of line with the track.
+constexpr int RB_SB_W         = 30;
+constexpr int RB_SB_GAP       = 4;
+constexpr int RB_SB_THUMB_W   = 15;
+constexpr int RB_SB_MIN_THUMB = 40;
+constexpr int RB_SB_THUMB_CAP = 16;
+constexpr int RB_SB_UP_H_FB   = 35;
+constexpr int RB_SB_DOWN_H_FB = 32;
 constexpr int RB_IDC_INSTALL = 101;
 constexpr int RB_IDC_CLOSE   = 102;
 constexpr int RB_IDC_MODCB   = 105;   // mod dropdown
@@ -335,6 +347,107 @@ static void RbDrawMenuItem(DRAWITEMSTRUCT* d) {
 }
 
 // Paint the detail panel (right side) for the selected entry.
+// ── Shared scrollbar ─────────────────────────────────────────────────
+// Drives both the catalog listbox (which scrolls by ITEM) and the
+// description body (which scrolls by PIXEL), so `pos`/`maxPos` are in
+// whatever unit the caller works in.
+
+struct RbSb {
+    bool present = false;
+    RECT area = {}, up = {}, down = {}, track = {}, thumb = {};
+    int  trackTop = 0, trackH = 0;
+    int  maxPos = 0;
+};
+
+static RbSb RbScrollbarGeom(const RECT& bar, int pos, int maxPos,
+                            int visibleSpan, int contentSpan) {
+    RbSb s;
+    int h = (int)(bar.bottom - bar.top);
+    if (h <= 0 || maxPos <= 0 || contentSpan <= 0) return s;
+
+    int upH = RB_SB_UP_H_FB, downH = RB_SB_DOWN_H_FB;
+    if (Gdiplus::Bitmap* a = AssetImage(L"scroll_up.png"))   upH   = (int)a->GetHeight();
+    if (Gdiplus::Bitmap* a = AssetImage(L"scroll_down.png")) downH = (int)a->GetHeight();
+
+    s.present = true;
+    s.maxPos  = maxPos;
+    s.area = bar;
+    s.up   = { bar.left, bar.top,            bar.right, bar.top + upH };
+    s.down = { bar.left, bar.bottom - downH, bar.right, bar.bottom };
+    s.trackTop = (int)bar.top + upH;
+    int trackBot = (int)bar.bottom - downH;
+    s.trackH = trackBot - s.trackTop;
+    if (s.trackH < 0) s.trackH = 0;
+    s.track = { bar.left, s.trackTop, bar.right, trackBot };
+
+    int thumbH = (int)((long long)s.trackH * visibleSpan / contentSpan);
+    if (thumbH < RB_SB_MIN_THUMB) thumbH = RB_SB_MIN_THUMB;
+    if (thumbH > s.trackH)        thumbH = s.trackH;
+    int travel = s.trackH - thumbH;
+    int top = s.trackTop;
+    if (travel > 0) {
+        if (pos < 0) pos = 0;
+        if (pos > maxPos) pos = maxPos;
+        top = s.trackTop + (int)((long long)pos * travel / maxPos);
+    }
+    int x = (int)bar.left + (RB_SB_W - RB_SB_THUMB_W) / 2;
+    s.thumb = { x, top, x + RB_SB_THUMB_W, top + thumbH };
+    return s;
+}
+
+static void RbDrawThumb(Graphics& g, Gdiplus::Bitmap* b,
+                        int x, int y, int w, int h, int cap) {
+    if (!b) return;
+    int sw = (int)b->GetWidth(), sh = (int)b->GetHeight();
+    if (h >= sh && h > cap * 2 && sh > cap * 2) {
+        g.DrawImage(b, Rect(x, y, w, cap), 0, 0, sw, cap, UnitPixel);
+        g.DrawImage(b, Rect(x, y + cap, w, h - cap * 2),
+                    0, cap, sw, sh - cap * 2, UnitPixel);
+        g.DrawImage(b, Rect(x, y + h - cap, w, cap),
+                    0, sh - cap, sw, cap, UnitPixel);
+    } else {
+        g.DrawImage(b, Rect(x, y, w, h), 0, 0, sw, sh, UnitPixel);
+    }
+}
+
+static void RbPaintScrollbar(Graphics& g, const RbSb& s) {
+    if (!s.present) return;
+    int aw = (int)(s.area.right - s.area.left);
+    int ah = (int)(s.area.bottom - s.area.top);
+    if (Gdiplus::Bitmap* tk = AssetImage(L"scrollbar_track.png")) {
+        g.DrawImage(tk, Rect((INT)s.area.left, (INT)s.area.top, (INT)aw, (INT)ah),
+                    0, 0, (INT)tk->GetWidth(), (INT)tk->GetHeight(), UnitPixel);
+    } else {
+        SolidBrush groove(Color(150, 0x10, 0x0A, 0x06));
+        g.FillRectangle(&groove, (INT)s.area.left, (INT)s.area.top, (INT)aw, (INT)ah);
+    }
+    int tw = (int)(s.thumb.right - s.thumb.left);
+    int th = (int)(s.thumb.bottom - s.thumb.top);
+    if (Gdiplus::Bitmap* tb = AssetImage(L"scroll.png")) {
+        RbDrawThumb(g, tb, (INT)s.thumb.left, (INT)s.thumb.top, tw, th,
+                    RB_SB_THUMB_CAP);
+    } else {
+        SolidBrush grip(Tok::BronzeBright);
+        g.FillRectangle(&grip, (INT)s.thumb.left, (INT)s.thumb.top, (INT)tw, (INT)th);
+    }
+    if (Gdiplus::Bitmap* up = AssetImage(L"scroll_up.png"))
+        g.DrawImage(up, (INT)s.up.left, (INT)s.up.top,
+                    (INT)up->GetWidth(), (INT)up->GetHeight());
+    if (Gdiplus::Bitmap* dn = AssetImage(L"scroll_down.png"))
+        g.DrawImage(dn, (INT)s.down.left, (INT)s.down.top,
+                    (INT)dn->GetWidth(), (INT)dn->GetHeight());
+}
+
+// Description scroll state. Only the body scrolls — the title, byline
+// and tag line stay pinned, so you keep sight of what you're reading
+// about. Reset whenever the selection changes.
+static int  g_rbDescScroll  = 0;   // physical px
+static int  g_rbDescMax     = 0;   // computed during paint
+static RECT g_rbDescBar     = {0,0,0,0};
+static RECT g_rbDescView    = {0,0,0,0};
+static bool g_rbDescDrag    = false;
+static int  g_rbDescGrabDY  = 0;
+
 // Draw a block of text wrapped to `w`, and return the height it
 // actually consumed. The detail panel used to advance y by hardcoded
 // amounts, which assumed every field fit on one line — a two-line name
@@ -410,12 +523,64 @@ static void RbPaintDetail(Graphics& g, int panelX, int panelY, int panelW, int p
     }
     delete tagF;
 
-    // Description takes whatever vertical room is left.
+    // ── Description body — the only part that scrolls ────────────────
+    // Everything above stays pinned: scrolling a long description
+    // shouldn't cost you sight of which plugin you're reading about.
     SolidBrush desc(Color(0xD0, 0xC2, 0xA0));
     Gdiplus::Font* descF = MakeUiFont((int)(14 * g_scale), false);
     wstring body = e.description.empty() ? e.summary : e.description;
-    if (avail() > 0) {
-        RbDrawBlock(g, body.c_str(), descF, desc, x, y, panelW, avail());
+    int viewH = avail();
+    if (viewH > 0 && descF) {
+        // Measure the full body first to find out whether it overflows.
+        StringFormat sfB;
+        sfB.SetAlignment(StringAlignmentNear);
+        sfB.SetLineAlignment(StringAlignmentNear);
+        RectF probe((REAL)x, (REAL)y, (REAL)panelW, (REAL)100000);
+        RectF bounds;
+        g.MeasureString(body.c_str(), -1, descF, probe, &sfB, &bounds);
+        int contentH = (int)(bounds.Height + 0.999f);
+
+        bool scrolls = contentH > viewH;
+        int textW = panelW;
+        if (scrolls) textW = panelW - (RB_SB_W + RB_SB_GAP);
+        if (textW < (int)(40 * g_scale)) { textW = panelW; scrolls = false; }
+
+        // Re-measure at the narrower width — reserving the gutter makes
+        // the text wrap differently, so the first measurement would
+        // under-report the height and clip the last lines.
+        if (scrolls) {
+            RectF probe2((REAL)x, (REAL)y, (REAL)textW, (REAL)100000);
+            g.MeasureString(body.c_str(), -1, descF, probe2, &sfB, &bounds);
+            contentH = (int)(bounds.Height + 0.999f);
+        }
+
+        g_rbDescMax  = scrolls ? (contentH - viewH) : 0;
+        if (g_rbDescScroll > g_rbDescMax) g_rbDescScroll = g_rbDescMax;
+        if (g_rbDescScroll < 0)           g_rbDescScroll = 0;
+        g_rbDescView = { x, y, x + textW, y + viewH };
+        g_rbDescBar  = scrolls
+            ? RECT{ x + panelW - RB_SB_W, y, x + panelW, y + viewH }
+            : RECT{ 0, 0, 0, 0 };
+
+        // Clip to the viewport so scrolled text can't spill over the
+        // pinned header above or the panel border below.
+        Gdiplus::Region prevClip;
+        g.GetClip(&prevClip);
+        g.SetClip(Rect((INT)x, (INT)y, (INT)textW, (INT)viewH),
+                  CombineModeIntersect);
+        g.DrawString(body.c_str(), -1, descF,
+                     RectF((REAL)x, (REAL)(y - g_rbDescScroll),
+                           (REAL)textW, (REAL)contentH),
+                     &sfB, &desc);
+        g.SetClip(&prevClip, CombineModeReplace);
+
+        if (scrolls) {
+            RbPaintScrollbar(g, RbScrollbarGeom(g_rbDescBar, g_rbDescScroll,
+                                                g_rbDescMax, viewH, contentH));
+        }
+    } else {
+        g_rbDescMax = 0;
+        g_rbDescBar = { 0, 0, 0, 0 };
     }
     delete descF;
 }
@@ -593,9 +758,96 @@ static LRESULT CALLBACK RepoBrowserProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
 
+    case WM_MOUSEWHEEL: {
+        // Wheel scrolls the description when the cursor is over it.
+        // WM_MOUSEWHEEL carries SCREEN coordinates, unlike the button
+        // messages — converting is required or the hit test is nonsense.
+        if (g_rbDescMax > 0) {
+            POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+            ScreenToClient(hw, &pt);
+            RECT hot = g_rbDescView;
+            if (g_rbDescBar.right > g_rbDescBar.left) hot.right = g_rbDescBar.right;
+            if (PtInRect(&hot, pt)) {
+                int delta = GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA;
+                g_rbDescScroll -= delta * (int)(48 * g_scale);
+                if (g_rbDescScroll < 0) g_rbDescScroll = 0;
+                if (g_rbDescScroll > g_rbDescMax) g_rbDescScroll = g_rbDescMax;
+                RECT rp = g_rbDescView;
+                rp.right = max(rp.right, g_rbDescBar.right);
+                InvalidateRect(hw, &rp, FALSE);
+                return 0;
+            }
+        }
+        break;
+    }
+
+    case WM_MOUSEMOVE: {
+        if (!g_rbDescDrag) break;
+        RbSb s = RbScrollbarGeom(g_rbDescBar, g_rbDescScroll, g_rbDescMax,
+                                 g_rbDescView.bottom - g_rbDescView.top,
+                                 (g_rbDescView.bottom - g_rbDescView.top)
+                                     + g_rbDescMax);
+        int thumbH = (int)(s.thumb.bottom - s.thumb.top);
+        int travel = s.trackH - thumbH;
+        if (s.present && travel > 0) {
+            int top = GET_Y_LPARAM(lp) - g_rbDescGrabDY;
+            if (top < s.trackTop)          top = s.trackTop;
+            if (top > s.trackTop + travel) top = s.trackTop + travel;
+            g_rbDescScroll = (int)((long long)(top - s.trackTop)
+                                   * g_rbDescMax / travel);
+            RECT rp = g_rbDescView;
+            rp.right = max(rp.right, g_rbDescBar.right);
+            InvalidateRect(hw, &rp, FALSE);
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONUP: {
+        if (g_rbDescDrag) {
+            g_rbDescDrag = false;
+            ReleaseCapture();
+            InvalidateRect(hw, &g_rbDescBar, FALSE);
+        }
+        return 0;
+    }
+
     case WM_LBUTTONDOWN: {
         int mx = GET_X_LPARAM(lp), my = GET_Y_LPARAM(lp);
         auto inRect = [&](const RECT& r){ return mx>=r.left && mx<r.right && my>=r.top && my<r.bottom; };
+
+        // Description scrollbar claims the click before anything else.
+        if (g_rbDescMax > 0 && g_rbDescBar.right > g_rbDescBar.left
+            && inRect(g_rbDescBar)) {
+            int viewH = g_rbDescView.bottom - g_rbDescView.top;
+            RbSb s = RbScrollbarGeom(g_rbDescBar, g_rbDescScroll, g_rbDescMax,
+                                     viewH, viewH + g_rbDescMax);
+            POINT pt = { mx, my };
+            int step = (int)(48 * g_scale);
+            int newPos = g_rbDescScroll;
+            if (s.present && PtInRect(&s.thumb, pt)) {
+                g_rbDescDrag   = true;
+                g_rbDescGrabDY = my - (int)s.thumb.top;
+                SetCapture(hw);
+                return 0;
+            } else if (s.present && PtInRect(&s.up, pt)) {
+                newPos -= step;
+            } else if (s.present && PtInRect(&s.down, pt)) {
+                newPos += step;
+            } else if (s.present && PtInRect(&s.track, pt)) {
+                newPos += (my < s.thumb.top) ? -viewH : viewH;
+            } else {
+                return 0;
+            }
+            if (newPos < 0) newPos = 0;
+            if (newPos > g_rbDescMax) newPos = g_rbDescMax;
+            if (newPos != g_rbDescScroll) {
+                g_rbDescScroll = newPos;
+                RECT rp = g_rbDescView;
+                rp.right = max(rp.right, g_rbDescBar.right);
+                InvalidateRect(hw, &rp, FALSE);
+            }
+            return 0;
+        }
 
         // Scope toggle OR its label box → flip scope.
         if (inRect(g_rbToggleRect) || inRect(g_rbScopeBoxRect)) {
@@ -710,6 +962,8 @@ static LRESULT CALLBACK RepoBrowserProc(HWND hw, UINT msg, WPARAM wp, LPARAM lp)
     case WM_COMMAND: {
         WORD id = LOWORD(wp), code = HIWORD(wp);
         if (id == RB_IDC_LIST && code == LBN_SELCHANGE) {
+            // New entry — start its description at the top.
+            g_rbDescScroll = 0;
             g_rbSel = (int)SendMessageW(g_rbList, LB_GETCURSEL, 0, 0);
             InvalidateRect(hw, nullptr, FALSE);
             return 0;

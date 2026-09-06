@@ -49,6 +49,11 @@ enum D2RLoaderInstallResult {
 // D2RL_ERR_BUSY and does nothing else.
 void StartD2RLoaderDownloadInstall(HWND notifyHwnd);
 
+// Lowercase hex SHA-256 of a file, or empty on failure. Shared with the
+// repository installer, which verifies Extension Hub downloads against
+// the hash the hub publishes.
+wstring ComputeFileSha256(const wstring& path);
+
 // ── Update availability check ────────────────────────────────────────
 //
 // Posted to the target window when the background version check finishes

@@ -88,6 +88,34 @@ struct PluginInstallPlan {
     // caller shows the notice first.
     bool     excelFilesPresent = false; // any Excel-dest files (→ mod picker)
 
+    // ── D2RLoader-root layout (v1.7) ─────────────────────────────────
+    // Extension Hub packages carry no plugin_info.json — we don't own
+    // those authors' zips. Instead they follow D2RLoader's documented
+    // convention: the archive is laid out RELATIVE TO THE D2RLOADER
+    // ROOT, i.e. plugins/ config/ patches/ at the top. Copying such a
+    // zip into the plugins folder (the old no-manifest behaviour) buries
+    // everything one level too deep — plugins/plugins/x.dll.
+    //
+    // When this is set, ExecuteNoManifest copies to the loader base
+    // instead, which lands each top-level folder where it belongs.
+    bool     loaderRootLayout = false;
+    // Source folder for the copy. Empty = tempDir. Set when the zip
+    // nests its tree inside a single top folder, so the copy starts
+    // below that wrapper — tempDir still points at the real temp root
+    // so cleanup isn't affected.
+    wstring  copyRoot;
+
+    // Loose-file routing (no manifest, no loader-root folders). Files are
+    // placed by extension: .dll → plugins/, .toml → config/. Anything
+    // else can't be placed automatically and is listed here so the UI can
+    // ask the user where it belongs.
+    //
+    // ⚠ THE PROMPT IS NOT BUILT YET. Until it is, unrouted files still
+    // go to plugins/ (the historical no-manifest behaviour) so nothing is
+    // silently dropped — this list only records what WOULD be asked
+    // about. Paths are relative to the extract root.
+    vector<wstring> unroutedFiles;
+
     // True if ANY file needs a mod chosen before it can be placed: excel
     // files, or Literal destPaths containing {mod}. On a global drop this
     // triggers the "which mod?" picker (one picker serves all of them).

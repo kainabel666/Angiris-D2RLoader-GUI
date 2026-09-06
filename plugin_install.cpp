@@ -383,6 +383,37 @@ bool IsBackupWorthy(const PluginFileOp& op) {
 // path that names a FOLDER, checking the root and one level deep (zips
 // commonly nest everything inside a single top folder).
 // ZI_DirExists comes from fs_utils.h.
+// Does this folder look like a D2RLoader ROOT tree — i.e. does it hold
+// any of the folders D2RLoader itself reads? Checked at the extract root
+// and one level deep, since zips commonly wrap everything in one folder.
+// Returns the folder that IS the loader root, or empty if the layout
+// doesn't match.
+wstring FindLoaderTreeRoot(const wstring& root) {
+    static const wchar_t* kLoaderDirs[] = { L"plugins", L"config", L"patches" };
+    auto looksLikeRoot = [&](const wstring& dir) {
+        for (const wchar_t* d : kLoaderDirs) {
+            if (ZI_DirExists(dir + L"\\" + d)) return true;
+        }
+        return false;
+    };
+    if (looksLikeRoot(root)) return root;
+
+    WIN32_FIND_DATAW fd;
+    wstring pat = root + L"\\*";
+    HANDLE h = FindFirstFileW(pat.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return L"";
+    wstring found;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0)
+            continue;
+        wstring sub = root + L"\\" + fd.cFileName;
+        if (looksLikeRoot(sub)) { found = sub; break; }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
+}
+
 wstring FindExtractedDir(const wstring& root, const wstring& relPath) {
     wstring direct = root + L"\\" + relPath;
     if (ZI_DirExists(direct)) return direct;
@@ -546,6 +577,53 @@ PluginInstallPlan InspectPluginZip(const wstring& zipPath,
         // ExecuteNoManifest. Mark ok so the caller proceeds.
         plan.ok = true;
         plan.hasManifest = false;
+        // Extension Hub packages have no manifest but DO follow
+        // D2RLoader's own layout (plugins/ config/ patches/ at the top).
+        // Detect that and aim the copy at the loader base so each folder
+        // lands where D2RLoader expects it, instead of being buried
+        // inside plugins/.
+        wstring treeRoot = FindLoaderTreeRoot(tmp);
+        if (!treeRoot.empty()) {
+            plan.loaderRootLayout = true;
+            plan.copyRoot = treeRoot;
+            plan.pluginsDir = D2rLoaderBase(d2rPath, scope, selectedMod);
+            return plan;
+        }
+
+        // No manifest AND no loader-root folders: loose files. Route them
+        // by extension into the folders D2RLoader reads, at the selected
+        // scope.
+        //   .dll  → plugins/    (what the loader loads)
+        //   .toml → config/     (D2RLoader's config convention)
+        // Anything else can't be placed with confidence — a .txt could be
+        // a readme or an excel table, a .json could be a patch or a
+        // plugin config — so it's recorded in unroutedFiles for the UI to
+        // ask about. Until that prompt exists it still goes to plugins/,
+        // matching the historical behaviour, so nothing is dropped.
+        const wstring base = D2rLoaderBase(d2rPath, scope, selectedMod);
+        vector<wstring> rels;
+        EnumerateFilesRecursive(tmp, L"", rels);
+        for (const wstring& rel : rels) {
+            PluginFileOp op;
+            op.srcTempPath = tmp + L"\\" + rel;
+            wstring leaf = BaseName(rel);
+            wstring ext  = ExtLower(rel);
+            if (ext == L".dll") {
+                op.destAbsPath = base + L"\\plugins\\" + leaf;
+                op.dest    = PluginDest::Plugins;
+                op.isDll   = true;
+            } else if (ext == L".toml") {
+                op.destAbsPath = base + L"\\config\\" + leaf;
+                op.dest      = PluginDest::Config;
+                op.isConfig  = true;
+            } else {
+                plan.unroutedFiles.push_back(rel);
+                op.destAbsPath = base + L"\\plugins\\" + leaf;
+                op.dest = PluginDest::Plugins;
+            }
+            plan.files.push_back(op);
+        }
+        if (!plan.files.empty()) plan.pluginsDir = base;
         return plan;
     }
     plan.hasManifest = true;
@@ -870,8 +948,30 @@ bool ExecuteNoManifest(PluginInstallPlan& plan) {
         DiscardPluginPlan(plan);
         return false;
     }
+    // Loose files were routed per-extension at plan time — copy those
+    // ops rather than dumping the tree. Config files get the same .old
+    // backup treatment the manifest path gives them, so a user's tuned
+    // settings survive a reinstall.
+    if (!plan.files.empty()) {
+        bool allOk = true;
+        for (const PluginFileOp& op : plan.files) {
+            if (op.destAbsPath.empty()) continue;
+            size_t sl = op.destAbsPath.find_last_of(L"\\/");
+            if (sl != wstring::npos) CreateDirTree(op.destAbsPath.substr(0, sl));
+            if (IsBackupWorthy(op)) BackupConfigIfExists(op.destAbsPath);
+            if (!CopyOneFile(op.srcTempPath, op.destAbsPath)) allOk = false;
+        }
+        DeleteFolderRecursive(plan.tempDir);
+        plan.tempDir.clear();
+        return allOk;
+    }
+
     CreateDirTree(plan.pluginsDir);
-    bool ok = CopyTreeInto(plan.tempDir, plan.pluginsDir, /*addMissing=*/true);
+    // copyRoot is set when the zip wraps its tree in a single folder;
+    // tempDir still points at the real temp root so cleanup below is
+    // unaffected.
+    const wstring& src = plan.copyRoot.empty() ? plan.tempDir : plan.copyRoot;
+    bool ok = CopyTreeInto(src, plan.pluginsDir, /*addMissing=*/true);
     DeleteFolderRecursive(plan.tempDir);
     plan.tempDir.clear();
     return ok;

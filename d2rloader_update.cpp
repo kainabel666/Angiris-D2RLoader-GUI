@@ -157,7 +157,10 @@ static wstring ScrapeSha256(const wstring& html) {
 // Compute the SHA-256 of a file using Win32 CNG (bcrypt) — no external
 // crypto dependency, just -lbcrypt. Returns lowercase hex, or empty on
 // any failure (caller treats that as "couldn't verify").
-static wstring ComputeFileSha256(const wstring& path) {
+// Non-static as of v1.7: the repository installer verifies Extension Hub
+// downloads against the sha256 the hub publishes for each release.
+// Declared in d2rloader_update.h.
+wstring ComputeFileSha256(const wstring& path) {
     wstring result;
     BCRYPT_ALG_HANDLE  hAlg  = nullptr;
     BCRYPT_HASH_HANDLE hHash = nullptr;
